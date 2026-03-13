@@ -1,0 +1,149 @@
+{
+  "projectType": "sdk-library",
+  "projectName": "NestJS Better Auth",
+  "projectDescription": "A comprehensive NestJS integration library for Better Auth, providing seamless authentication and authorization for your NestJS applications.",
+  "theme": "mint",
+  "primaryColor": "#7c7c7c",
+  "lightColor": "#050505",
+  "darkColor": "#c8c8c8",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "installation",
+              "quickstart"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "core/auth-module",
+              "core/auth-guard",
+              "core/auth-service",
+              "core/session-management"
+            ]
+          },
+          {
+            "group": "Authentication",
+            "pages": [
+              "authentication/route-protection",
+              "authentication/decorators",
+              "authentication/anonymous-routes",
+              "authentication/optional-auth"
+            ]
+          },
+          {
+            "group": "Authorization",
+            "pages": [
+              "authorization/roles",
+              "authorization/organization-roles",
+              "authorization/permissions",
+              "authorization/organization-permissions"
+            ]
+          },
+          {
+            "group": "Advanced",
+            "pages": [
+              "advanced/hooks",
+              "advanced/body-parser",
+              "advanced/cors",
+              "advanced/custom-middleware",
+              "advanced/websocket-support",
+              "advanced/graphql-support"
+            ]
+          },
+          {
+            "group": "Configuration",
+            "pages": [
+              "configuration/module-options",
+              "configuration/express-setup",
+              "configuration/fastify-setup"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Module",
+            "pages": [
+              "api/auth-module"
+            ]
+          },
+          {
+            "group": "Services",
+            "pages": [
+              "api/auth-service"
+            ]
+          },
+          {
+            "group": "Guards",
+            "pages": [
+              "api/auth-guard"
+            ]
+          },
+          {
+            "group": "Decorators",
+            "pages": [
+              "api/decorators/session",
+              "api/decorators/allow-anonymous",
+              "api/decorators/optional-auth",
+              "api/decorators/roles",
+              "api/decorators/org-roles",
+              "api/decorators/user-has-permission",
+              "api/decorators/member-has-permission",
+              "api/decorators/hook",
+              "api/decorators/before-hook",
+              "api/decorators/after-hook"
+            ]
+          },
+          {
+            "group": "Types",
+            "pages": [
+              "api/types/user-session",
+              "api/types/auth-hook-context",
+              "api/types/permission-check"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Seamless integration with Better Auth",
+    "Global authentication guard with route-level overrides",
+    "Role-based access control (RBAC) for system and organization levels",
+    "Permission-based access control for fine-grained authorization",
+    "Support for Express and Fastify adapters",
+    "WebSocket and GraphQL authentication support",
+    "Custom hooks with dependency injection",
+    "Automatic body parser configuration",
+    "Built-in CORS handling for trusted origins",
+    "TypeScript-first with full type safety"
+  ],
+  "publicApiSurface": [
+    "AuthModule.forRoot()",
+    "AuthModule.forRootAsync()",
+    "AuthService",
+    "AuthGuard",
+    "@Session()",
+    "@AllowAnonymous()",
+    "@OptionalAuth()",
+    "@Roles()",
+    "@OrgRoles()",
+    "@UserHasPermission()",
+    "@MemberHasPermission()",
+    "@Hook()",
+    "@BeforeHook()",
+    "@AfterHook()",
+    "UserSession",
+    "AuthHookContext",
+    "PermissionCheck"
+  ]
+}
