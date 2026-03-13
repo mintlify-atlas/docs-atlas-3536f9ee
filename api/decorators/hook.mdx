@@ -1,0 +1,370 @@
+---
+title: '@Hook'
+description: Class decorator that marks a provider as containing hook methods
+---
+
+## Overview
+
+`@Hook()` is a class decorator that marks a NestJS provider as containing hook methods decorated with `@BeforeHook()` or `@AfterHook()`. This decorator is required for the `AuthModule` to discover and register your hook providers.
+
+## Type Signature
+
+```typescript
+export const Hook = (): ClassDecorator => SetMetadata(HOOK_KEY, true);
+```
+
+## Usage
+
+### Basic Usage
+
+```typescript
+import { Injectable } from '@nestjs/common';
+import { Hook, BeforeHook } from '@better-auth/nestjs';
+import type { AuthHookContext } from '@better-auth/nestjs';
+
+@Hook()
+@Injectable()
+export class AuthHooks {
+  @BeforeHook('/sign-in/email')
+  async beforeSignIn(ctx: AuthHookContext) {
+    console.log('User attempting to sign in:', ctx.body.email);
+  }
+}
+```
+
+### Multiple Hook Methods
+
+```typescript
+import { Hook, BeforeHook, AfterHook } from '@better-auth/nestjs';
+
+@Hook()
+@Injectable()
+export class AuthHooks {
+  @BeforeHook('/sign-in/email')
+  async beforeSignIn(ctx: AuthHookContext) {
+    console.log('Before sign in');
+  }
+
+  @AfterHook('/sign-in/email')
+  async afterSignIn(ctx: AuthHookContext) {
+    console.log('After sign in');
+  }
+
+  @BeforeHook('/sign-up/email')
+  async beforeSignUp(ctx: AuthHookContext) {
+    console.log('Before sign up');
+  }
+}
+```
+
+## Requirements
+
+### Module Configuration
+
+Your Better Auth instance **must** have `hooks: {}` configured:
+
+```typescript
+import { betterAuth } from 'better-auth';
+
+export const auth = betterAuth({
+  database: /* ... */,
+  // REQUIRED: Enable hooks support
+  hooks: {},
+});
+```
+
+### Provider Registration
+
+The hook provider must be registered in a module:
+
+```typescript
+import { Module } from '@nestjs/common';
+import { AuthHooks } from './auth.hooks';
+
+@Module({
+  providers: [AuthHooks],
+})
+export class AppModule {}
+```
+
+## Examples
+
+### Email Notifications
+
+```typescript
+import { Injectable } from '@nestjs/common';
+import { Hook, AfterHook } from '@better-auth/nestjs';
+import type { AuthHookContext } from '@better-auth/nestjs';
+import { EmailService } from './email.service';
+
+@Hook()
+@Injectable()
+export class AuthHooks {
+  constructor(private emailService: EmailService) {}
+
+  @AfterHook('/sign-up/email')
+  async sendWelcomeEmail(ctx: AuthHookContext) {
+    const { email, name } = ctx.body;
+    await this.emailService.sendWelcome(email, name);
+  }
+
+  @AfterHook('/sign-in/email')
+  async notifySignIn(ctx: AuthHookContext) {
+    const { email } = ctx.body;
+    await this.emailService.sendSignInNotification(email);
+  }
+}
+```
+
+### Validation and Security
+
+```typescript
+import { Hook, BeforeHook } from '@better-auth/nestjs';
+import { UnauthorizedException } from '@nestjs/common';
+
+@Hook()
+@Injectable()
+export class SecurityHooks {
+  constructor(private securityService: SecurityService) {}
+
+  @BeforeHook('/sign-in/email')
+  async checkBanned(ctx: AuthHookContext) {
+    const { email } = ctx.body;
+    const isBanned = await this.securityService.isUserBanned(email);
+    
+    if (isBanned) {
+      throw new UnauthorizedException('Account banned');
+    }
+  }
+
+  @BeforeHook('/sign-up/email')
+  async validateEmail(ctx: AuthHookContext) {
+    const { email } = ctx.body;
+    const isAllowed = await this.securityService.isEmailAllowed(email);
+    
+    if (!isAllowed) {
+      throw new UnauthorizedException('Email domain not allowed');
+    }
+  }
+}
+```
+
+### Analytics Tracking
+
+```typescript
+import { Hook, AfterHook } from '@better-auth/nestjs';
+
+@Hook()
+@Injectable()
+export class AnalyticsHooks {
+  constructor(private analytics: AnalyticsService) {}
+
+  @AfterHook('/sign-up/email')
+  async trackSignUp(ctx: AuthHookContext) {
+    await this.analytics.track('user_signed_up', {
+      email: ctx.body.email,
+      method: 'email',
+      timestamp: new Date(),
+    });
+  }
+
+  @AfterHook('/sign-in/email')
+  async trackSignIn(ctx: AuthHookContext) {
+    await this.analytics.track('user_signed_in', {
+      email: ctx.body.email,
+      method: 'email',
+      timestamp: new Date(),
+    });
+  }
+}
+```
+
+### User Onboarding
+
+```typescript
+import { Hook, AfterHook } from '@better-auth/nestjs';
+
+@Hook()
+@Injectable()
+export class OnboardingHooks {
+  constructor(
+    private userService: UserService,
+    private emailService: EmailService,
+  ) {}
+
+  @AfterHook('/sign-up/email')
+  async createUserProfile(ctx: AuthHookContext) {
+    const { email, name } = ctx.body;
+    
+    // Create user profile
+    await this.userService.createProfile({ email, name });
+    
+    // Send welcome email
+    await this.emailService.sendWelcome(email, name);
+    
+    // Start onboarding flow
+    await this.userService.startOnboarding(email);
+  }
+}
+```
+
+### Audit Logging
+
+```typescript
+import { Hook, BeforeHook, AfterHook } from '@better-auth/nestjs';
+
+@Hook()
+@Injectable()
+export class AuditHooks {
+  constructor(private auditLog: AuditLogService) {}
+
+  @BeforeHook() // All routes
+  async logBefore(ctx: AuthHookContext) {
+    await this.auditLog.log({
+      event: 'auth_request',
+      path: ctx.path,
+      body: ctx.body,
+      timestamp: new Date(),
+    });
+  }
+
+  @AfterHook() // All routes
+  async logAfter(ctx: AuthHookContext) {
+    await this.auditLog.log({
+      event: 'auth_response',
+      path: ctx.path,
+      timestamp: new Date(),
+    });
+  }
+}
+```
+
+## Dependency Injection
+
+Hook providers support standard NestJS dependency injection:
+
+```typescript
+@Hook()
+@Injectable()
+export class AuthHooks {
+  constructor(
+    private readonly emailService: EmailService,
+    private readonly userService: UserService,
+    private readonly logger: LoggerService,
+  ) {}
+
+  @AfterHook('/sign-up/email')
+  async handleSignUp(ctx: AuthHookContext) {
+    // Use injected services
+    this.logger.log('User signed up:', ctx.body.email);
+    await this.emailService.sendWelcome(ctx.body.email);
+    await this.userService.initializeProfile(ctx.body);
+  }
+}
+```
+
+## Error Handling
+
+If hooks configuration is missing:
+
+```typescript
+// Better Auth config WITHOUT hooks: {}
+throw new Error(
+  "Detected @Hook providers but Better Auth 'hooks' are not configured. " +
+  "Add 'hooks: {}' to your betterAuth(...) options."
+);
+```
+
+## Discovery Process
+
+When the `AuthModule` initializes:
+
+1. **Scans all providers** for `@Hook()` metadata
+2. **Discovers hook methods** decorated with `@BeforeHook()` or `@AfterHook()`
+3. **Registers hooks** with Better Auth's hook system
+4. **Executes hooks** when corresponding auth routes are called
+
+## Best Practices
+
+### Organize by Feature
+
+```typescript
+// auth-security.hooks.ts
+@Hook()
+@Injectable()
+export class AuthSecurityHooks {
+  @BeforeHook('/sign-in/email')
+  async checkSecurity(ctx: AuthHookContext) { /* ... */ }
+}
+
+// auth-notifications.hooks.ts
+@Hook()
+@Injectable()
+export class AuthNotificationHooks {
+  @AfterHook('/sign-up/email')
+  async sendNotifications(ctx: AuthHookContext) { /* ... */ }
+}
+
+// auth-analytics.hooks.ts
+@Hook()
+@Injectable()
+export class AuthAnalyticsHooks {
+  @AfterHook()
+  async trackEvents(ctx: AuthHookContext) { /* ... */ }
+}
+```
+
+### Use Descriptive Method Names
+
+```typescript
+@Hook()
+@Injectable()
+export class AuthHooks {
+  @BeforeHook('/sign-in/email')
+  async preventBannedUsers(ctx: AuthHookContext) { /* ... */ }
+
+  @AfterHook('/sign-up/email')
+  async sendWelcomeEmail(ctx: AuthHookContext) { /* ... */ }
+
+  @AfterHook('/verify-email')
+  async trackEmailVerification(ctx: AuthHookContext) { /* ... */ }
+}
+```
+
+### Handle Async Operations
+
+```typescript
+@Hook()
+@Injectable()
+export class AuthHooks {
+  @AfterHook('/sign-up/email')
+  async handleSignUp(ctx: AuthHookContext) {
+    // All async operations properly awaited
+    await this.emailService.send(ctx.body.email);
+    await this.analyticsService.track('signup');
+    await this.userService.initializeProfile(ctx.body);
+  }
+}
+```
+
+## Notes
+
+- Must be applied to `@Injectable()` classes
+- Class must be registered as a provider
+- Better Auth config must include `hooks: {}`
+- All methods with `@BeforeHook()` or `@AfterHook()` will be registered
+- Supports constructor injection of other services
+
+## Related
+
+<CardGroup cols={3}>
+  <Card title="@BeforeHook" href="/api/decorators/before-hook" icon="arrow-right">
+    Execute before auth routes
+  </Card>
+  <Card title="@AfterHook" href="/api/decorators/after-hook" icon="arrow-left">
+    Execute after auth routes
+  </Card>
+  <Card title="AuthHookContext" href="/api/types/auth-hook-context" icon="circle-info">
+    Hook context type
+  </Card>
+</CardGroup>

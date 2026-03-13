@@ -1,0 +1,428 @@
+---
+title: 'AuthHookContext'
+description: Type representing the context object passed to hook methods
+---
+
+## Overview
+
+`AuthHookContext` is the TypeScript type for the context object passed to methods decorated with `@BeforeHook()` or `@AfterHook()`. It provides access to request data, headers, and metadata for auth operations.
+
+## Type Definition
+
+```typescript
+export type AuthHookContext = Parameters<
+  Parameters<typeof createAuthMiddleware>[0]
+>[0];
+```
+
+This type is derived from Better Auth's `createAuthMiddleware` function parameters.
+
+## Structure
+
+<ResponseField name="path" type="string" required>
+  The auth route path being processed
+  
+  Examples: `/sign-in/email`, `/sign-up/email`, `/verify-email`
+</ResponseField>
+
+<ResponseField name="method" type="string" required>
+  HTTP method of the request
+  
+  Examples: `POST`, `GET`, `PUT`, `DELETE`
+</ResponseField>
+
+<ResponseField name="body" type="Record<string, any>" required>
+  Parsed request body data
+  
+  Contains form data, JSON payloads, or other request body content
+</ResponseField>
+
+<ResponseField name="headers" type="Headers" required>
+  Request headers as a Web API Headers object
+  
+  Access via `headers.get('header-name')`
+</ResponseField>
+
+<ResponseField name="request" type="Request" required>
+  Full Web API Request object
+  
+  Provides access to additional request properties like `ip`, `url`, etc.
+</ResponseField>
+
+<ResponseField name="context" type="object">
+  Additional context data provided by Better Auth
+</ResponseField>
+
+## Usage
+
+### Basic Usage
+
+```typescript
+import { Hook, BeforeHook } from '@better-auth/nestjs';
+import type { AuthHookContext } from '@better-auth/nestjs';
+
+@Hook()
+@Injectable()
+export class AuthHooks {
+  @BeforeHook('/sign-in/email')
+  async logSignIn(ctx: AuthHookContext) {
+    console.log('Path:', ctx.path);
+    console.log('Method:', ctx.method);
+    console.log('Email:', ctx.body.email);
+  }
+}
+```
+
+### Accessing Request Body
+
+```typescript
+@Hook()
+@Injectable()
+export class ValidationHooks {
+  @BeforeHook('/sign-up/email')
+  async validateSignUp(ctx: AuthHookContext) {
+    const { email, password, name } = ctx.body;
+    
+    console.log('User signing up:', { email, name });
+    
+    // Validate email format
+    if (!email.includes('@')) {
+      throw new BadRequestException('Invalid email');
+    }
+    
+    // Validate password strength
+    if (password.length < 8) {
+      throw new BadRequestException('Password too short');
+    }
+  }
+}
+```
+
+### Accessing Headers
+
+```typescript
+@Hook()
+@Injectable()
+export class SecurityHooks {
+  @BeforeHook('/sign-in/email')
+  async checkHeaders(ctx: AuthHookContext) {
+    // Get user agent
+    const userAgent = ctx.headers.get('user-agent');
+    console.log('User agent:', userAgent);
+    
+    // Get authorization header
+    const auth = ctx.headers.get('authorization');
+    
+    // Get custom headers
+    const apiKey = ctx.headers.get('x-api-key');
+    
+    // Check content type
+    const contentType = ctx.headers.get('content-type');
+  }
+}
+```
+
+### Accessing Request Metadata
+
+```typescript
+@Hook()
+@Injectable()
+export class TrackingHooks {
+  @AfterHook('/sign-in/email')
+  async trackSignIn(ctx: AuthHookContext) {
+    await this.analytics.track('sign_in', {
+      path: ctx.path,
+      method: ctx.method,
+      email: ctx.body.email,
+      userAgent: ctx.headers.get('user-agent'),
+      referer: ctx.headers.get('referer'),
+      timestamp: new Date(),
+    });
+  }
+}
+```
+
+## Common Body Properties
+
+### Sign Up Email
+
+```typescript
+@BeforeHook('/sign-up/email')
+async handleSignUp(ctx: AuthHookContext) {
+  const body = ctx.body as {
+    email: string;
+    password: string;
+    name?: string;
+    image?: string;
+  };
+  
+  console.log('Sign up:', body.email);
+}
+```
+
+### Sign In Email
+
+```typescript
+@BeforeHook('/sign-in/email')
+async handleSignIn(ctx: AuthHookContext) {
+  const body = ctx.body as {
+    email: string;
+    password: string;
+    rememberMe?: boolean;
+  };
+  
+  console.log('Sign in:', body.email);
+}
+```
+
+### Verify Email
+
+```typescript
+@AfterHook('/verify-email')
+async handleVerify(ctx: AuthHookContext) {
+  const body = ctx.body as {
+    token: string;
+  };
+  
+  console.log('Email verified with token:', body.token);
+}
+```
+
+### Reset Password
+
+```typescript
+@BeforeHook('/reset-password')
+async handleReset(ctx: AuthHookContext) {
+  const body = ctx.body as {
+    email: string;
+  };
+  
+  console.log('Password reset requested:', body.email);
+}
+```
+
+## Examples
+
+### Logging Hook
+
+```typescript
+@Hook()
+@Injectable()
+export class LoggingHooks {
+  constructor(private logger: LoggerService) {}
+
+  @BeforeHook()
+  async logRequest(ctx: AuthHookContext) {
+    this.logger.log(`Auth request: ${ctx.method} ${ctx.path}`, {
+      path: ctx.path,
+      method: ctx.method,
+      body: ctx.body,
+      headers: Object.fromEntries(ctx.headers.entries()),
+    });
+  }
+}
+```
+
+### Rate Limiting Hook
+
+```typescript
+@Hook()
+@Injectable()
+export class RateLimitHooks {
+  constructor(private rateLimiter: RateLimiterService) {}
+
+  @BeforeHook('/sign-in/email')
+  async checkRateLimit(ctx: AuthHookContext) {
+    const { email } = ctx.body;
+    const ip = ctx.request.ip || 'unknown';
+    
+    const isLimited = await this.rateLimiter.check(`signin:${email}:${ip}`);
+    
+    if (isLimited) {
+      throw new TooManyRequestsException(
+        'Too many sign-in attempts'
+      );
+    }
+  }
+}
+```
+
+### Email Notification Hook
+
+```typescript
+@Hook()
+@Injectable()
+export class EmailHooks {
+  constructor(private emailService: EmailService) {}
+
+  @AfterHook('/sign-up/email')
+  async sendWelcome(ctx: AuthHookContext) {
+    const { email, name } = ctx.body;
+    
+    await this.emailService.send({
+      to: email,
+      subject: 'Welcome!',
+      template: 'welcome',
+      data: { name },
+    });
+  }
+
+  @AfterHook('/sign-in/email')
+  async sendSignInAlert(ctx: AuthHookContext) {
+    const { email } = ctx.body;
+    const userAgent = ctx.headers.get('user-agent');
+    const ip = ctx.request.ip;
+    
+    await this.emailService.send({
+      to: email,
+      subject: 'New sign-in detected',
+      template: 'signin-alert',
+      data: { userAgent, ip, timestamp: new Date() },
+    });
+  }
+}
+```
+
+### Analytics Hook
+
+```typescript
+@Hook()
+@Injectable()
+export class AnalyticsHooks {
+  constructor(private analytics: AnalyticsService) {}
+
+  @AfterHook()
+  async trackAuthEvent(ctx: AuthHookContext) {
+    const event = {
+      name: `auth_${ctx.path.split('/').pop()}`,
+      path: ctx.path,
+      method: ctx.method,
+      timestamp: new Date(),
+      userAgent: ctx.headers.get('user-agent'),
+      referer: ctx.headers.get('referer'),
+    };
+    
+    if (ctx.body.email) {
+      event['email'] = ctx.body.email;
+    }
+    
+    await this.analytics.track(event);
+  }
+}
+```
+
+### Security Hook
+
+```typescript
+@Hook()
+@Injectable()
+export class SecurityHooks {
+  constructor(
+    private geoService: GeoService,
+    private securityService: SecurityService,
+  ) {}
+
+  @BeforeHook('/sign-in/email')
+  async checkSecurity(ctx: AuthHookContext) {
+    const { email } = ctx.body;
+    const ip = ctx.request.ip || 'unknown';
+    const userAgent = ctx.headers.get('user-agent') || 'unknown';
+    
+    // Check if user is banned
+    const isBanned = await this.securityService.isUserBanned(email);
+    if (isBanned) {
+      throw new UnauthorizedException('Account banned');
+    }
+    
+    // Check if IP is blocked
+    const isBlocked = await this.securityService.isIpBlocked(ip);
+    if (isBlocked) {
+      throw new UnauthorizedException('IP address blocked');
+    }
+    
+    // Check geo-location
+    const country = await this.geoService.getCountry(ip);
+    const isAllowed = await this.securityService.isCountryAllowed(country);
+    if (!isAllowed) {
+      throw new UnauthorizedException(
+        'Sign in from your location is not allowed'
+      );
+    }
+  }
+}
+```
+
+## Modifying Request Data
+
+You can modify `ctx.body` in before hooks:
+
+```typescript
+@Hook()
+@Injectable()
+export class DataModificationHooks {
+  @BeforeHook('/sign-up/email')
+  async normalizeData(ctx: AuthHookContext) {
+    // Normalize email to lowercase
+    if (ctx.body.email) {
+      ctx.body.email = ctx.body.email.toLowerCase().trim();
+    }
+    
+    // Add metadata
+    ctx.body.metadata = {
+      ...ctx.body.metadata,
+      signupSource: 'web',
+      userAgent: ctx.headers.get('user-agent'),
+      timestamp: new Date().toISOString(),
+    };
+  }
+}
+```
+
+## Type Safety
+
+Create typed body interfaces for specific routes:
+
+```typescript
+interface SignUpBody {
+  email: string;
+  password: string;
+  name?: string;
+  image?: string;
+}
+
+@Hook()
+@Injectable()
+export class AuthHooks {
+  @BeforeHook('/sign-up/email')
+  async handleSignUp(ctx: AuthHookContext) {
+    const body = ctx.body as SignUpBody;
+    
+    // TypeScript knows the structure
+    console.log(body.email);
+    console.log(body.name);
+  }
+}
+```
+
+## Notes
+
+- Context is provided by Better Auth's middleware system
+- `body` structure varies by auth route
+- `headers` is a Web API Headers object (use `.get()` method)
+- `request` provides additional metadata like IP address
+- Before hooks can modify `ctx.body` to affect auth processing
+- After hooks receive context after auth operation completes
+
+## Related
+
+<CardGroup cols={3}>
+  <Card title="@BeforeHook" href="/api/decorators/before-hook" icon="arrow-right">
+    Execute before auth routes
+  </Card>
+  <Card title="@AfterHook" href="/api/decorators/after-hook" icon="arrow-left">
+    Execute after auth routes
+  </Card>
+  <Card title="@Hook" href="/api/decorators/hook" icon="webhook">
+    Mark class as hook provider
+  </Card>
+</CardGroup>

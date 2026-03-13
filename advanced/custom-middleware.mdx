@@ -1,0 +1,351 @@
+---
+title: "Custom Middleware"
+description: "Wrap Better Auth handler with custom middleware for request-scoped integrations"
+---
+
+## Overview
+
+The `middleware` option allows you to wrap the Better Auth handler with custom middleware. This is useful for integrating with libraries that require request context, such as MikroORM's `RequestContext`.
+
+## Basic Usage
+
+Provide a middleware function that receives standard Express middleware parameters:
+
+```ts title="app.module.ts"
+import { Module } from "@nestjs/common";
+import { AuthModule } from "@thallesp/nestjs-better-auth";
+import { auth } from "./auth";
+
+@Module({
+  imports: [
+    AuthModule.forRoot({
+      auth,
+      middleware: (req, res, next) => {
+        // Your custom logic here
+        console.log('Before Better Auth handler');
+        
+        // Call next() to invoke the Better Auth handler
+        next();
+        
+        // Code after next() runs after Better Auth completes
+        console.log('After Better Auth handler');
+      },
+    }),
+  ],
+})
+export class AppModule {}
+```
+
+## Middleware Signature
+
+The middleware function receives three parameters:
+
+```ts
+type Middleware = (
+  req: Request,      // Express/Fastify request
+  res: Response,     // Express/Fastify response
+  next: () => void   // Function to invoke Better Auth handler
+) => void;
+```
+
+## MikroORM RequestContext
+
+One of the most common use cases is integrating with MikroORM's `RequestContext`:
+
+```ts title="app.module.ts"
+import { Module } from "@nestjs/common";
+import { AuthModule } from "@thallesp/nestjs-better-auth";
+import { RequestContext } from "@mikro-orm/core";
+import { auth } from "./auth";
+import { orm } from "./orm";
+
+@Module({
+  imports: [
+    AuthModule.forRoot({
+      auth,
+      middleware: (req, res, next) => {
+        // Wrap Better Auth handler in MikroORM RequestContext
+        RequestContext.create(orm.em, next);
+      },
+    }),
+  ],
+})
+export class AppModule {}
+```
+
+This ensures that Better Auth operations have access to the MikroORM entity manager with proper request isolation.
+
+## Complete MikroORM Example
+
+```ts title="app.module.ts"
+import { Module } from "@nestjs/common";
+import { MikroOrmModule } from "@mikro-orm/nestjs";
+import { AuthModule } from "@thallesp/nestjs-better-auth";
+import { RequestContext } from "@mikro-orm/core";
+import { auth } from "./auth";
+import mikroOrmConfig from "./mikro-orm.config";
+
+@Module({
+  imports: [
+    MikroOrmModule.forRoot(mikroOrmConfig),
+    AuthModule.forRoot({
+      auth,
+      middleware: (req, res, next) => {
+        // Access MikroORM instance from the module
+        const orm = MikroOrmModule.forRoot(mikroOrmConfig);
+        RequestContext.create(orm.em, next);
+      },
+    }),
+  ],
+})
+export class AppModule {}
+```
+
+### With ORM Service
+
+If you have an ORM service:
+
+```ts title="orm.service.ts"
+import { Injectable } from "@nestjs/common";
+import { MikroORM } from "@mikro-orm/core";
+
+@Injectable()
+export class OrmService {
+  constructor(public readonly orm: MikroORM) {}
+}
+```
+
+```ts title="app.module.ts"
+import { Module } from "@nestjs/common";
+import { AuthModule } from "@thallesp/nestjs-better-auth";
+import { RequestContext } from "@mikro-orm/core";
+import { auth } from "./auth";
+import { OrmService } from "./orm.service";
+
+@Module({
+  imports: [
+    AuthModule.forRoot({
+      auth,
+      middleware: (req, res, next) => {
+        const ormService = app.get(OrmService);
+        RequestContext.create(ormService.orm.em, next);
+      },
+    }),
+  ],
+  providers: [OrmService],
+})
+export class AppModule {}
+```
+
+## Logging Example
+
+Log all Better Auth requests:
+
+```ts
+AuthModule.forRoot({
+  auth,
+  middleware: (req, res, next) => {
+    const start = Date.now();
+    
+    console.log(`[Better Auth] ${req.method} ${req.url}`);
+    
+    next();
+    
+    const duration = Date.now() - start;
+    console.log(`[Better Auth] Completed in ${duration}ms`);
+  },
+})
+```
+
+## Request Tracking Example
+
+Add request tracking headers:
+
+```ts
+import { randomUUID } from 'crypto';
+
+AuthModule.forRoot({
+  auth,
+  middleware: (req, res, next) => {
+    // Add request ID
+    const requestId = req.headers['x-request-id'] || randomUUID();
+    res.setHeader('x-request-id', requestId);
+    
+    // Store in request for later use
+    (req as any).requestId = requestId;
+    
+    next();
+  },
+})
+```
+
+## Authentication Metrics Example
+
+Track authentication metrics:
+
+```ts
+import { MetricsService } from './metrics.service';
+
+const metricsService = app.get(MetricsService);
+
+AuthModule.forRoot({
+  auth,
+  middleware: (req, res, next) => {
+    const route = req.url.split('?')[0]; // Get route without query params
+    
+    metricsService.incrementCounter(`auth.requests.${route}`);
+    
+    const start = Date.now();
+    next();
+    const duration = Date.now() - start;
+    
+    metricsService.recordDuration(`auth.duration.${route}`, duration);
+  },
+})
+```
+
+## Error Handling Example
+
+Add custom error handling:
+
+```ts
+AuthModule.forRoot({
+  auth,
+  middleware: (req, res, next) => {
+    try {
+      next();
+    } catch (error) {
+      console.error('[Better Auth] Error:', error);
+      
+      // Log to error tracking service
+      errorTrackingService.captureException(error, {
+        tags: { component: 'auth' },
+        extra: {
+          method: req.method,
+          url: req.url,
+        },
+      });
+      
+      throw error; // Re-throw to let Better Auth handle it
+    }
+  },
+})
+```
+
+## Security Headers Example
+
+Add security headers to auth responses:
+
+```ts
+AuthModule.forRoot({
+  auth,
+  middleware: (req, res, next) => {
+    // Add security headers
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('X-Frame-Options', 'DENY');
+    res.setHeader('X-XSS-Protection', '1; mode=block');
+    
+    next();
+  },
+})
+```
+
+## Rate Limiting Example
+
+Implement custom rate limiting:
+
+```ts
+import { RateLimiterService } from './rate-limiter.service';
+
+const rateLimiter = app.get(RateLimiterService);
+
+AuthModule.forRoot({
+  auth,
+  middleware: async (req, res, next) => {
+    const ip = req.ip || req.connection.remoteAddress;
+    
+    if (!await rateLimiter.checkLimit(ip)) {
+      res.status(429).json({ error: 'Too many requests' });
+      return;
+    }
+    
+    next();
+  },
+})
+```
+
+## Chaining Multiple Middlewares
+
+You can chain multiple middleware functions:
+
+```ts
+function createMiddlewareChain(...middlewares: Middleware[]): Middleware {
+  return (req, res, next) => {
+    let index = 0;
+    
+    const executeNext = () => {
+      if (index < middlewares.length) {
+        const middleware = middlewares[index++];
+        middleware(req, res, executeNext);
+      } else {
+        next(); // Call Better Auth handler
+      }
+    };
+    
+    executeNext();
+  };
+}
+
+AuthModule.forRoot({
+  auth,
+  middleware: createMiddlewareChain(
+    loggingMiddleware,
+    metricsMiddleware,
+    securityHeadersMiddleware,
+  ),
+})
+```
+
+## Important Notes
+
+<Warning>
+  The middleware only applies to Better Auth routes (e.g., `/api/auth/*`). It does not affect your application routes.
+</Warning>
+
+<Note>
+  The `next()` function invokes the Better Auth handler. You must call it for authentication to work.
+</Note>
+
+## Use Cases
+
+Use custom middleware for:
+
+- **Request Context Management** - MikroORM, TypeORM, etc.
+- **Logging** - Track auth requests and performance
+- **Metrics** - Collect authentication metrics
+- **Security Headers** - Add additional security headers
+- **Rate Limiting** - Implement custom rate limiting
+- **Request Tracking** - Add correlation IDs
+- **Error Tracking** - Send errors to monitoring services
+
+## Debugging
+
+Add debugging middleware during development:
+
+```ts
+AuthModule.forRoot({
+  auth,
+  middleware: (req, res, next) => {
+    if (process.env.NODE_ENV === 'development') {
+      console.log('\n=== Better Auth Request ===')
+      console.log('Method:', req.method);
+      console.log('URL:', req.url);
+      console.log('Headers:', req.headers);
+      console.log('Body:', req.body);
+      console.log('===========================\n');
+    }
+    
+    next();
+  },
+})
+```

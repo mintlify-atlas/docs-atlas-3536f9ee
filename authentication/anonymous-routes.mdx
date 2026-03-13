@@ -1,0 +1,394 @@
+---
+title: Anonymous Routes
+description: Allow unauthenticated access to specific routes with @AllowAnonymous()
+---
+
+## Overview
+
+The `@AllowAnonymous()` decorator completely bypasses authentication for specific routes or controllers. This is useful for public endpoints that should be accessible without authentication.
+
+```typescript
+import { Controller, Get } from "@nestjs/common";
+import { AllowAnonymous } from "@thallesp/nestjs-better-auth";
+
+@Controller("api")
+export class ApiController {
+  @AllowAnonymous()
+  @Get("health")
+  async healthCheck() {
+    return { status: "ok" };
+  }
+}
+```
+
+## Method-Level Usage
+
+Apply `@AllowAnonymous()` to individual route handlers:
+
+```typescript title="public.controller.ts"
+import { Controller, Get, Post } from "@nestjs/common";
+import { AllowAnonymous, Session, UserSession } from "@thallesp/nestjs-better-auth";
+
+@Controller("api")
+export class ApiController {
+  @AllowAnonymous()
+  @Get("health")
+  async healthCheck() {
+    // No authentication required
+    return { status: "ok", timestamp: new Date() };
+  }
+
+  @AllowAnonymous()
+  @Get("version")
+  async version() {
+    // No authentication required
+    return { version: "1.0.0" };
+  }
+
+  @Get("user-data")
+  async getUserData(@Session() session: UserSession) {
+    // This route is protected (no @AllowAnonymous)
+    return { userId: session.user.id };
+  }
+
+  @AllowAnonymous()
+  @Post("contact")
+  async contact(@Body() body: { email: string; message: string }) {
+    // Public contact form
+    return { success: true };
+  }
+}
+```
+
+## Class-Level Usage
+
+Apply `@AllowAnonymous()` to an entire controller to make all routes public:
+
+```typescript title="public.controller.ts"
+import { Controller, Get } from "@nestjs/common";
+import { AllowAnonymous } from "@thallesp/nestjs-better-auth";
+
+@AllowAnonymous() // All routes in this controller are public
+@Controller("public")
+export class PublicController {
+  @Get("about")
+  async about() {
+    return { page: "about", title: "About Us" };
+  }
+
+  @Get("contact")
+  async contact() {
+    return { page: "contact", email: "support@example.com" };
+  }
+
+  @Get("pricing")
+  async pricing() {
+    return { plans: ["free", "pro", "enterprise"] };
+  }
+}
+```
+
+### Overriding Class-Level Decorator
+
+You can protect specific routes within a public controller by removing the decorator:
+
+```typescript
+@AllowAnonymous()
+@Controller("content")
+export class ContentController {
+  @Get("public-articles")
+  async publicArticles() {
+    // Public (inherited from class)
+    return { articles: [] };
+  }
+
+  @Get("my-drafts")
+  async myDrafts(@Session() session: UserSession) {
+    // This route is protected - need to apply protection manually
+    // by NOT using @AllowAnonymous at method level
+    return { drafts: [], userId: session.user.id };
+  }
+}
+```
+
+<Note>
+  Method-level decorators take precedence over class-level decorators through NestJS's `getAllAndOverride` mechanism.
+</Note>
+
+## Common Use Cases
+
+### Health Checks
+
+```typescript title="health.controller.ts"
+import { Controller, Get } from "@nestjs/common";
+import { AllowAnonymous } from "@thallesp/nestjs-better-auth";
+
+@Controller()
+export class HealthController {
+  @AllowAnonymous()
+  @Get("health")
+  async check() {
+    return {
+      status: "ok",
+      timestamp: new Date().toISOString(),
+    };
+  }
+
+  @AllowAnonymous()
+  @Get("ready")
+  async ready() {
+    // Kubernetes readiness probe
+    return { ready: true };
+  }
+}
+```
+
+### Public API Endpoints
+
+```typescript title="api.controller.ts"
+import { Controller, Get, Query } from "@nestjs/common";
+import { AllowAnonymous } from "@thallesp/nestjs-better-auth";
+
+@Controller("api")
+export class ApiController {
+  @AllowAnonymous()
+  @Get("products")
+  async getProducts(@Query("category") category?: string) {
+    // Public product catalog
+    return { products: [], category };
+  }
+
+  @AllowAnonymous()
+  @Get("products/:id")
+  async getProduct(@Param("id") id: string) {
+    // Public product details
+    return { id, name: "Product" };
+  }
+}
+```
+
+### Documentation Routes
+
+```typescript title="docs.controller.ts"
+import { Controller, Get } from "@nestjs/common";
+import { AllowAnonymous } from "@thallesp/nestjs-better-auth";
+
+@AllowAnonymous()
+@Controller("docs")
+export class DocsController {
+  @Get()
+  async index() {
+    return { title: "API Documentation" };
+  }
+
+  @Get("openapi.json")
+  async openapi() {
+    return { openapi: "3.0.0" };
+  }
+}
+```
+
+### Webhook Receivers
+
+```typescript title="webhooks.controller.ts"
+import { Controller, Post, Headers, Body } from "@nestjs/common";
+import { AllowAnonymous } from "@thallesp/nestjs-better-auth";
+
+@Controller("webhooks")
+export class WebhooksController {
+  @AllowAnonymous()
+  @Post("stripe")
+  async stripeWebhook(
+    @Headers("stripe-signature") signature: string,
+    @Body() body: any,
+  ) {
+    // Verify signature before processing
+    // Authentication is handled by signature verification, not session
+    return { received: true };
+  }
+
+  @AllowAnonymous()
+  @Post("github")
+  async githubWebhook(
+    @Headers("x-hub-signature-256") signature: string,
+    @Body() body: any,
+  ) {
+    // Verify signature
+    return { received: true };
+  }
+}
+```
+
+### Landing Pages
+
+```typescript title="pages.controller.ts"
+import { Controller, Get, Render } from "@nestjs/common";
+import { AllowAnonymous } from "@thallesp/nestjs-better-auth";
+
+@AllowAnonymous()
+@Controller()
+export class PagesController {
+  @Get()
+  @Render("index")
+  async home() {
+    return { title: "Home" };
+  }
+
+  @Get("features")
+  @Render("features")
+  async features() {
+    return { title: "Features" };
+  }
+}
+```
+
+## GraphQL Support
+
+The `@AllowAnonymous()` decorator works with GraphQL resolvers:
+
+```typescript title="public.resolver.ts"
+import { Query, Resolver } from "@nestjs/graphql";
+import { AllowAnonymous } from "@thallesp/nestjs-better-auth";
+
+@Resolver()
+export class PublicResolver {
+  @AllowAnonymous()
+  @Query(() => [Product])
+  async products() {
+    // Public query
+    return [];
+  }
+
+  @AllowAnonymous()
+  @Query(() => String)
+  async version() {
+    return "1.0.0";
+  }
+}
+```
+
+## WebSocket Support
+
+For WebSocket gateways, use `@AllowAnonymous()` with `@UseGuards(AuthGuard)`:
+
+```typescript title="events.gateway.ts"
+import { UseGuards } from "@nestjs/common";
+import { SubscribeMessage, WebSocketGateway } from "@nestjs/websockets";
+import { AuthGuard, AllowAnonymous, Session, UserSession } from "@thallesp/nestjs-better-auth";
+
+@WebSocketGateway({ path: "/ws" })
+@UseGuards(AuthGuard)
+export class EventsGateway {
+  @AllowAnonymous()
+  @SubscribeMessage("ping")
+  handlePing() {
+    // Public message handler
+    return { pong: true };
+  }
+
+  @SubscribeMessage("private-message")
+  handlePrivateMessage(@Session() session: UserSession) {
+    // Protected message handler
+    return { userId: session.user.id };
+  }
+}
+```
+
+## Session Access in Anonymous Routes
+
+Even in anonymous routes, you can optionally check if a user is authenticated:
+
+```typescript title="mixed.controller.ts"
+import { Controller, Get, Request } from "@nestjs/common";
+import { AllowAnonymous } from "@thallesp/nestjs-better-auth";
+import type { UserSession } from "@thallesp/nestjs-better-auth";
+
+@Controller("content")
+export class ContentController {
+  @AllowAnonymous()
+  @Get("featured")
+  async getFeatured(
+    @Request() req: { session?: UserSession | null },
+  ) {
+    // Route is public, but check if user is logged in
+    const isAuthenticated = !!req.session;
+    
+    if (isAuthenticated) {
+      return { featured: true, personalized: true };
+    }
+    
+    return { featured: true, personalized: false };
+  }
+}
+```
+
+<Tip>
+  If you need to support both authenticated and unauthenticated users with different behavior, consider using `@OptionalAuth()` instead - it provides better type safety.
+</Tip>
+
+## Security Considerations
+
+<Warning>
+  Use `@AllowAnonymous()` carefully. Only apply it to routes that truly need to be public. Review all anonymous routes regularly.
+</Warning>
+
+### Best Practices
+
+1. **Be Explicit** - Apply `@AllowAnonymous()` deliberately to each route
+2. **Avoid Class-Level for Mixed Controllers** - If a controller has both public and protected routes, prefer method-level decorators
+3. **Document Public Routes** - Add comments explaining why routes are public
+4. **Rate Limiting** - Consider rate limiting for public endpoints
+5. **Input Validation** - Always validate input on public endpoints
+
+```typescript
+@Controller("api")
+export class ApiController {
+  @AllowAnonymous()
+  @Get("health")
+  // Public: Required for monitoring
+  async healthCheck() {
+    return { status: "ok" };
+  }
+
+  @Get("admin")
+  // Protected: Admin access only (no @AllowAnonymous)
+  async adminDashboard(@Session() session: UserSession) {
+    return { admin: true };
+  }
+}
+```
+
+## Difference from @OptionalAuth()
+
+| Feature | @AllowAnonymous() | @OptionalAuth() |
+|---------|------------------|----------------|
+| Authentication check | Skipped entirely | Checked, but optional |
+| Session availability | Not guaranteed | Available if authenticated |
+| Type safety | `req.session` may be undefined | `session: UserSession \| null` |
+| Use case | Truly public endpoints | Enhanced content for logged-in users |
+
+<CardGroup cols={2}>
+  <Card title="Optional Auth" icon="shield-halved" href="/authentication/optional-auth">
+    Learn about @OptionalAuth() for routes with optional authentication
+  </Card>
+  <Card title="Route Protection" icon="shield" href="/authentication/route-protection">
+    Learn about the global AuthGuard
+  </Card>
+</CardGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Optional Auth" icon="shield-halved" href="/authentication/optional-auth">
+    Make authentication optional for routes
+  </Card>
+  <Card title="Decorators" icon="at" href="/authentication/decorators">
+    View all authentication decorators
+  </Card>
+  <Card title="Authorization" icon="user-shield" href="/authorization/roles">
+    Add role-based access control
+  </Card>
+  <Card title="Session Management" icon="clock" href="/core/session-management">
+    Learn about session management
+  </Card>
+</CardGroup>

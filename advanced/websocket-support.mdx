@@ -1,0 +1,391 @@
+---
+title: "WebSocket Support"
+description: "Protect WebSocket gateways with Better Auth authentication"
+---
+
+## Overview
+
+WebSocket gateways work seamlessly with Better Auth authentication. The global `AuthGuard` applies to WebSocket connections and messages, and you can use the same decorators (`@AllowAnonymous()`, `@OptionalAuth()`, `@Session()`) as with REST routes.
+
+<Warning>
+  You **must** explicitly use `@UseGuards(AuthGuard)` on WebSocket gateways. The global guard registration doesn't automatically apply to WebSockets.
+</Warning>
+
+## Basic Setup
+
+### 1. Create a WebSocket Gateway
+
+```ts title="gateways/chat.gateway.ts"
+import {
+  SubscribeMessage,
+  WebSocketGateway,
+  WebSocketServer,
+} from "@nestjs/websockets";
+import { UseGuards } from "@nestjs/common";
+import { Namespace } from "socket.io";
+import {
+  AuthGuard,
+  Session,
+  type UserSession,
+} from "@thallesp/nestjs-better-auth";
+
+@WebSocketGateway({
+  path: "/ws",
+  namespace: "chat",
+  cors: {
+    origin: "*",
+  },
+})
+@UseGuards(AuthGuard)  // Required for WebSocket authentication
+export class ChatGateway {
+  @WebSocketServer()
+  namespace: Namespace;
+
+  @SubscribeMessage("message")
+  handleMessage(@Session() session: UserSession) {
+    return {
+      event: "message",
+      data: `Hello ${session.user.name}`,
+    };
+  }
+}
+```
+
+### 2. Register the Gateway
+
+```ts title="app.module.ts"
+import { Module } from "@nestjs/common";
+import { AuthModule } from "@thallesp/nestjs-better-auth";
+import { ChatGateway } from "./gateways/chat.gateway";
+import { auth } from "./auth";
+
+@Module({
+  imports: [AuthModule.forRoot({ auth })],
+  providers: [ChatGateway],
+})
+export class AppModule {}
+```
+
+## Authentication
+
+### Client-Side Authentication
+
+Pass the Bearer token in the `Authorization` header:
+
+```ts title="client.ts"
+import { io } from "socket.io-client";
+
+// After successful login
+const { token } = await signIn(email, password);
+
+// Connect with authentication
+const socket = io("http://localhost:3000/chat", {
+  path: "/ws",
+  extraHeaders: {
+    Authorization: `Bearer ${token}`,
+  },
+});
+
+socket.on("connect", () => {
+  console.log("Connected!");
+});
+
+socket.on("exception", (error) => {
+  console.error("Error:", error);
+});
+```
+
+### Handling Unauthenticated Connections
+
+If a client connects without a valid token, they'll receive an exception:
+
+```ts
+// Client receives this when not authenticated
+socket.on("exception", (error) => {
+  console.error(error.message); // "UNAUTHORIZED"
+});
+```
+
+## Accessing the Session
+
+Use the `@Session()` decorator to access the authenticated user:
+
+```ts
+import { SubscribeMessage } from "@nestjs/websockets";
+import { Session, type UserSession } from "@thallesp/nestjs-better-auth";
+
+@SubscribeMessage("getUserInfo")
+handleGetUserInfo(@Session() session: UserSession) {
+  return {
+    event: "userInfo",
+    data: {
+      userId: session.user.id,
+      name: session.user.name,
+      email: session.user.email,
+    },
+  };
+}
+```
+
+## Public WebSocket Events
+
+Allow unauthenticated access to specific events:
+
+```ts
+import { AllowAnonymous } from "@thallesp/nestjs-better-auth";
+
+@SubscribeMessage("ping")
+@AllowAnonymous()
+handlePing() {
+  return {
+    event: "pong",
+    data: "Hello World!",
+  };
+}
+```
+
+## Optional Authentication
+
+Make authentication optional for an event:
+
+```ts
+import { OptionalAuth, Session, type UserSession } from "@thallesp/nestjs-better-auth";
+
+@OptionalAuth()
+@SubscribeMessage("greet")
+handleGreeting(@Session() session: UserSession) {
+  const message = session
+    ? `Hello authenticated user: ${session.user.name}`
+    : "Hello anonymous user";
+  
+  return {
+    event: "greeting",
+    data: message,
+  };
+}
+```
+
+## Streaming Data
+
+Use RxJS observables for streaming:
+
+```ts
+import { SubscribeMessage, WsResponse } from "@nestjs/websockets";
+import { from, map, Observable } from "rxjs";
+import { Session, type UserSession } from "@thallesp/nestjs-better-auth";
+
+@SubscribeMessage("stream")
+handleStream(
+  @Session() session: UserSession
+): Observable<WsResponse<string>> {
+  const message = session.user.name;
+  
+  return from(message.split("")).pipe(
+    map((char) => ({ event: "stream", data: char }))
+  );
+}
+```
+
+## Complete Example
+
+Here's a complete gateway with multiple event types:
+
+```ts title="gateways/test.gateway.ts"
+import {
+  SubscribeMessage,
+  WebSocketGateway,
+  WebSocketServer,
+  WsResponse,
+} from "@nestjs/websockets";
+import { from, map, Observable } from "rxjs";
+import { Namespace } from "socket.io";
+import {
+  AllowAnonymous,
+  OptionalAuth,
+  Session,
+  type UserSession,
+} from "@thallesp/nestjs-better-auth";
+import { UseGuards } from "@nestjs/common";
+import { AuthGuard } from "@thallesp/nestjs-better-auth";
+
+@WebSocketGateway({
+  path: "/ws",
+  namespace: "test",
+  cors: {
+    origin: "*",
+  },
+})
+@UseGuards(AuthGuard)
+export class TestGateway {
+  @WebSocketServer()
+  namespace: Namespace;
+
+  // Public event - no authentication required
+  @SubscribeMessage("anonymous")
+  @AllowAnonymous()
+  handleHello(): Observable<WsResponse<string>> {
+    return from("Hello World!".split("")).pipe(
+      map((char) => ({ event: "anonymous", data: char }))
+    );
+  }
+
+  // Protected event - authentication required
+  @SubscribeMessage("protected")
+  handleProtected(
+    @Session() session: UserSession
+  ): Observable<WsResponse<string>> {
+    return from(session.user.name.split("")).pipe(
+      map((char) => ({ event: "protected", data: char }))
+    );
+  }
+
+  // Optional authentication - works with or without auth
+  @OptionalAuth()
+  @SubscribeMessage("optional")
+  handleOptionalAuth(
+    @Session() session: UserSession
+  ): Observable<WsResponse<string>> {
+    const message = session
+      ? `Hello authenticated user: ${session.user.name}`
+      : "Hello anonymous user";
+
+    return from(message.split("")).pipe(
+      map((char) => ({ event: "optional", data: char }))
+    );
+  }
+}
+```
+
+## Client Example
+
+Complete client-side example:
+
+```ts title="client.ts"
+import { io } from "socket.io-client";
+
+// 1. Sign in and get token
+const { token } = await fetch("http://localhost:3000/api/auth/sign-in/email", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ email: "user@example.com", password: "password" }),
+}).then(res => res.json());
+
+// 2. Connect to WebSocket with authentication
+const socket = io("http://localhost:3000/test", {
+  path: "/ws",
+  extraHeaders: {
+    Authorization: `Bearer ${token}`,
+  },
+});
+
+// 3. Handle connection
+socket.on("connect", () => {
+  console.log("Connected to WebSocket");
+  
+  // Send authenticated message
+  socket.emit("protected");
+});
+
+// 4. Handle responses
+socket.on("protected", (data: string) => {
+  console.log("Protected response:", data);
+});
+
+// 5. Handle errors
+socket.on("exception", (error) => {
+  console.error("Error:", error.message);
+});
+
+// 6. Handle disconnect
+socket.on("disconnect", () => {
+  console.log("Disconnected from WebSocket");
+});
+```
+
+## Testing WebSockets
+
+Example test for WebSocket authentication:
+
+```ts title="websocket-auth.e2e.test.ts"
+import { io as ioc, type Socket as ClientSocket } from "socket.io-client";
+import { faker } from "@faker-js/faker";
+
+it("should allow authenticated access to protected websocket event", async () => {
+  // Sign up and get token
+  const signUp = await auth.api.signUpEmail({
+    body: {
+      name: faker.person.fullName(),
+      email: faker.internet.email(),
+      password: faker.internet.password({ length: 10 }),
+    },
+  });
+
+  // Connect with authentication
+  const clientSocket = ioc(`http://localhost:${port}/test`, {
+    path: "/ws",
+    extraHeaders: {
+      Authorization: `Bearer ${signUp.token}`,
+    },
+  });
+
+  await waitFor(clientSocket, "connect");
+
+  // Emit protected event
+  const responsePromise = collectStreamData(
+    clientSocket,
+    "protected",
+    signUp.user.name.length
+  );
+
+  clientSocket.emit("protected");
+
+  const result = await responsePromise;
+  expect(result).toBe(signUp.user.name);
+});
+```
+
+## Important Notes
+
+<Warning>
+  - You **must** use `@UseGuards(AuthGuard)` on WebSocket gateways
+  - The global guard doesn't automatically apply to WebSockets
+  - Authentication happens per connection, not per message
+  - Invalid tokens will prevent the connection from being established
+</Warning>
+
+<Note>
+  - Use `@AllowAnonymous()` to allow unauthenticated connections
+  - Use `@OptionalAuth()` to make authentication optional
+  - Use `@Session()` to access the authenticated user
+  - The same decorators work for WebSockets and REST routes
+</Note>
+
+## Troubleshooting
+
+### "UNAUTHORIZED" Exception
+
+**Problem:** Client receives "UNAUTHORIZED" exception on connection.
+
+**Solutions:**
+- Verify the token is valid and not expired
+- Check the `Authorization` header format: `Bearer <token>`
+- Ensure `@UseGuards(AuthGuard)` is present on the gateway
+- Verify Better Auth is properly configured
+
+### Session is Undefined
+
+**Problem:** `@Session()` returns `undefined`.
+
+**Solutions:**
+- Check if `@UseGuards(AuthGuard)` is present
+- Verify the event is not marked with `@AllowAnonymous()`
+- Ensure the client is sending a valid token
+
+### Gateway Not Protecting Events
+
+**Problem:** Unauthenticated clients can access protected events.
+
+**Solutions:**
+- Add `@UseGuards(AuthGuard)` to the gateway class
+- Remove any `@AllowAnonymous()` decorators from protected events
+- Verify the guard is properly imported

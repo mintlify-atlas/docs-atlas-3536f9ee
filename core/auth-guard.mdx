@@ -1,0 +1,376 @@
+---
+title: 'AuthGuard'
+description: 'Global authentication guard for route protection'
+icon: 'shield-halved'
+---
+
+The `AuthGuard` is a NestJS guard that handles authentication and authorization for your application. It's automatically registered globally by the AuthModule and protects all routes by default.
+
+## Overview
+
+The AuthGuard:
+
+- Validates user sessions on every request
+- Attaches session data to the request object
+- Supports HTTP, GraphQL, and WebSocket contexts
+- Enforces role-based and permission-based access control
+- Throws context-appropriate exceptions (HTTP, WebSocket, GraphQL, RPC)
+
+## How It Works
+
+The guard implements NestJS's `CanActivate` interface and runs before your route handlers:
+
+```typescript
+@Injectable()
+export class AuthGuard implements CanActivate {
+  async canActivate(context: ExecutionContext): Promise<boolean> {
+    // 1. Extract request from execution context
+    // 2. Validate session using Better Auth
+    // 3. Attach session to request object
+    // 4. Check decorators (@AllowAnonymous, @OptionalAuth, @Roles, etc.)
+    // 5. Return true or throw error
+  }
+}
+```
+
+**Source:** `/workspace/source/src/auth-guard.ts:112-224`
+
+## Authentication Flow
+
+### Step 1: Session Retrieval
+
+The guard extracts headers and validates the session:
+
+```typescript
+const session: UserSession | null = await this.options.auth.api.getSession({
+  headers: fromNodeHeaders(request.headers || request?.handshake?.headers || []),
+});
+
+request.session = session;
+request.user = session?.user ?? null;
+```
+
+**Source:** `/workspace/source/src/auth-guard.ts:129-136`
+
+### Step 2: Public Route Check
+
+Routes decorated with `@AllowAnonymous()` bypass authentication:
+
+```typescript
+const isPublic = this.reflector.getAllAndOverride<boolean>('PUBLIC', [
+  context.getHandler(),
+  context.getClass(),
+]);
+
+if (isPublic) return true;
+```
+
+**Source:** `/workspace/source/src/auth-guard.ts:138-143`
+
+### Step 3: Optional Authentication
+
+Routes with `@OptionalAuth()` allow unauthenticated access:
+
+```typescript
+const isOptional = this.reflector.getAllAndOverride<boolean>('OPTIONAL', [
+  context.getHandler(),
+  context.getClass(),
+]);
+
+if (!session && isOptional) return true;
+```
+
+**Source:** `/workspace/source/src/auth-guard.ts:145-150`
+
+### Step 4: Require Authentication
+
+If no session exists and the route isn't public/optional, throw an error:
+
+```typescript
+const ctxType = context.getType();
+if (!session) throw await AuthContextErrorMap[ctxType].UNAUTHORIZED();
+```
+
+**Source:** `/workspace/source/src/auth-guard.ts:152-153`
+
+### Step 5: Authorization Checks
+
+After authentication, the guard enforces authorization rules:
+
+- **@Roles()** - Checks `user.role` field
+- **@OrgRoles()** - Checks organization member role
+- **@UserHasPermission()** - Validates user permissions
+- **@MemberHasPermission()** - Validates organization member permissions
+
+See the [Roles](/api/decorators/roles) and [Permissions](/api/decorators/user-has-permission) documentation for details.
+
+## Execution Contexts
+
+The guard adapts to different NestJS execution contexts:
+
+### HTTP Context
+
+For REST endpoints:
+
+```typescript
+@Controller('users')
+export class UserController {
+  @Get('me')
+  async getProfile(@Session() session: UserSession) {
+    return session.user;
+  }
+}
+```
+
+Throws `UnauthorizedException` (401) or `ForbiddenException` (403).
+
+### GraphQL Context
+
+For GraphQL resolvers:
+
+```typescript
+@Resolver()
+export class UserResolver {
+  @Query(() => User)
+  async me(@Session() session: UserSession) {
+    return session.user;
+  }
+}
+```
+
+Throws GraphQL-compatible exceptions.
+
+### WebSocket Context
+
+For WebSocket gateways:
+
+```typescript
+import { UseGuards } from '@nestjs/common';
+import { WebSocketGateway } from '@nestjs/websockets';
+import { AuthGuard } from '@thallesp/nestjs-better-auth';
+
+@WebSocketGateway()
+@UseGuards(AuthGuard) // Required for WebSocket
+export class EventsGateway {
+  @SubscribeMessage('message')
+  handleMessage(@Session() session: UserSession) {
+    return session.user;
+  }
+}
+```
+
+<Warning>
+  WebSocket requires explicit `@UseGuards(AuthGuard)` at the Gateway or Message level. Global registration doesn't automatically apply to WebSockets.
+</Warning>
+
+Throws `WsException` (requires `@nestjs/websockets` dependency).
+
+**Source:** `/workspace/source/src/auth-guard.ts:61-104`
+
+## Error Handling
+
+The guard throws context-appropriate errors:
+
+```typescript
+const AuthContextErrorMap: Record<
+  ContextType | 'graphql',
+  Record<keyof typeof AuthErrorType, (args?: unknown) => Promise<Error>>
+> = {
+  http: {
+    UNAUTHORIZED: async (args) => new UnauthorizedException(args ?? {
+      code: 'UNAUTHORIZED',
+      message: 'Unauthorized',
+    }),
+    FORBIDDEN: async (args) => new ForbiddenException(args ?? {
+      code: 'FORBIDDEN',
+      message: 'Insufficient permissions',
+    }),
+  },
+  graphql: { /* ... */ },
+  ws: { /* ... */ },
+  rpc: { /* ... */ },
+};
+```
+
+**Source:** `/workspace/source/src/auth-guard.ts:61-105`
+
+## UserSession Type
+
+The guard uses the `UserSession` type for type-safe session data:
+
+```typescript
+export type BaseUserSession = NonNullable<
+  Awaited<ReturnType<ReturnType<typeof getSession>>>
+>;
+
+export type UserSession = BaseUserSession & {
+  user: BaseUserSession['user'] & {
+    role?: string | string[];
+  };
+  session: BaseUserSession['session'] & {
+    activeOrganizationId?: string;
+  };
+};
+```
+
+**Source:** `/workspace/source/src/auth-guard.ts:25-36`
+
+This type extends Better Auth's session with:
+- `user.role` - For admin plugin role-based access control
+- `session.activeOrganizationId` - For organization plugin context
+
+## Controlling Access
+
+### Allow Anonymous Access
+
+Use `@AllowAnonymous()` to skip authentication:
+
+```typescript
+import { AllowAnonymous } from '@thallesp/nestjs-better-auth';
+
+@Controller('public')
+export class PublicController {
+  @Get('health')
+  @AllowAnonymous()
+  healthCheck() {
+    return { status: 'ok' };
+  }
+}
+```
+
+### Optional Authentication
+
+Use `@OptionalAuth()` when authentication is optional:
+
+```typescript
+import { OptionalAuth, Session, UserSession } from '@thallesp/nestjs-better-auth';
+
+@Controller('posts')
+export class PostController {
+  @Get()
+  @OptionalAuth()
+  async list(@Session() session: UserSession | null) {
+    // Returns public posts for anonymous users
+    // Returns personalized posts for authenticated users
+    return session ? this.getPersonalizedPosts(session) : this.getPublicPosts();
+  }
+}
+```
+
+### Role-Based Access
+
+Use `@Roles()` and `@OrgRoles()` for role checks:
+
+```typescript
+import { Roles, OrgRoles } from '@thallesp/nestjs-better-auth';
+
+@Controller('admin')
+export class AdminController {
+  @Get('dashboard')
+  @Roles(['admin']) // System admin only
+  adminDashboard() {
+    return { message: 'System admin dashboard' };
+  }
+
+  @Get('org-settings')
+  @OrgRoles(['owner', 'admin']) // Organization owner/admin
+  orgSettings(@Session() session: UserSession) {
+    return { orgId: session.session.activeOrganizationId };
+  }
+}
+```
+
+See the [Roles documentation](/api/decorators/roles) for more details.
+
+### Permission-Based Access
+
+Use `@UserHasPermission()` and `@MemberHasPermission()` for fine-grained control:
+
+```typescript
+import { UserHasPermission, MemberHasPermission } from '@thallesp/nestjs-better-auth';
+
+@Controller('projects')
+export class ProjectController {
+  @Post()
+  @UserHasPermission({ permission: { project: ['create'] } })
+  createProject() {
+    return { message: 'Project created' };
+  }
+
+  @Delete(':id')
+  @MemberHasPermission({ permissions: { project: ['delete'] } })
+  deleteProject() {
+    return { message: 'Project deleted' };
+  }
+}
+```
+
+See the [Permissions documentation](/api/decorators/user-has-permission) for more details.
+
+## Disabling the Global Guard
+
+If you prefer manual guard management:
+
+```typescript title="app.module.ts"
+AuthModule.forRoot({
+  auth,
+  disableGlobalAuthGuard: true,
+})
+```
+
+Then apply guards explicitly:
+
+```typescript
+import { UseGuards } from '@nestjs/common';
+import { AuthGuard } from '@thallesp/nestjs-better-auth';
+
+@Controller('users')
+@UseGuards(AuthGuard)
+export class UserController {
+  // All routes require authentication
+}
+```
+
+Or register it globally yourself:
+
+```typescript title="app.module.ts"
+import { APP_GUARD } from '@nestjs/core';
+import { AuthGuard } from '@thallesp/nestjs-better-auth';
+
+@Module({
+  providers: [
+    {
+      provide: APP_GUARD,
+      useClass: AuthGuard,
+    },
+  ],
+})
+export class AppModule {}
+```
+
+## Source Reference
+
+Key implementation files:
+
+- **AuthGuard class:** `/workspace/source/src/auth-guard.ts:112-470`
+- **canActivate method:** `/workspace/source/src/auth-guard.ts:127-224`
+- **Role checks:** `/workspace/source/src/auth-guard.ts:290-325`
+- **Permission checks:** `/workspace/source/src/auth-guard.ts:336-469`
+- **Error mapping:** `/workspace/source/src/auth-guard.ts:61-105`
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Session Decorator" icon="at" href="/api/decorators/session">
+    Access session data in your route handlers
+  </Card>
+  <Card title="Roles & Permissions" icon="users-gear" href="/api/decorators/roles">
+    Implement role-based and permission-based access control
+  </Card>
+  <Card title="Session Management" icon="user-lock" href="/core/session-management">
+    Learn how sessions are validated and attached
+  </Card>
+  <Card title="AuthService" icon="code" href="/core/auth-service">
+    Access Better Auth API methods
+  </Card>
+</CardGroup>

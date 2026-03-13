@@ -1,0 +1,231 @@
+---
+title: Organization-Level Roles
+description: Protect routes using organization member roles with the @OrgRoles() decorator
+---
+
+The `@OrgRoles()` decorator provides organization-scoped role-based access control by checking organization member roles from Better Auth's [organization plugin](https://www.better-auth.com/docs/plugins/organization).
+
+<Warning>
+  **Security Note:** `@OrgRoles()` ONLY checks organization member roles and does NOT check `user.role`. This separation ensures system admins cannot access organization routes without proper organization context.
+</Warning>
+
+## Prerequisites
+
+Configure Better Auth with the organization plugin:
+
+```ts title="auth.ts"
+import { betterAuth } from "better-auth";
+import { organization } from "better-auth/plugins/organization";
+
+export const auth = betterAuth({
+  basePath: "/api/auth",
+  plugins: [
+    organization(), // Enable organization plugin for member roles
+  ],
+});
+```
+
+## Basic Usage
+
+Restrict routes to organization members with specific roles:
+
+```ts title="org.controller.ts"
+import { Controller, Get } from "@nestjs/common";
+import { OrgRoles, Session, UserSession } from "@thallesp/nestjs-better-auth";
+
+@Controller("org")
+export class OrgController {
+  @OrgRoles(["owner", "admin"])
+  @Get("settings")
+  async getOrgSettings(@Session() session: UserSession) {
+    // Only org owners/admins can access (requires activeOrganizationId)
+    // System admins (user.role = 'admin') CANNOT access without org context
+    return { orgId: session.session.activeOrganizationId };
+  }
+}
+```
+
+<Warning>
+  Routes protected with `@OrgRoles()` require an active organization (`activeOrganizationId` in session). Users without an active organization will receive a 403 Forbidden response.
+</Warning>
+
+## Default Organization Roles
+
+Better Auth's organization plugin provides three default roles:
+
+- **owner**: Organization creator (automatically assigned)
+- **admin**: Organization administrator
+- **member**: Regular organization member
+
+```ts title="org.controller.ts"
+import { Controller, Get, Post } from "@nestjs/common";
+import { OrgRoles } from "@thallesp/nestjs-better-auth";
+
+@Controller("org")
+export class OrgController {
+  @OrgRoles(["owner"])
+  @Get("billing")
+  async getOrgBilling() {
+    // Only org owners can access
+    return { message: "Billing settings" };
+  }
+
+  @OrgRoles(["owner", "admin"])
+  @Post("invite")
+  async inviteMember() {
+    // Org owners and admins can invite
+    return { message: "Invitation sent" };
+  }
+
+  @OrgRoles(["member"])
+  @Get("projects")
+  async listProjects() {
+    // All members (including owners and admins) can access
+    return { projects: [] };
+  }
+}
+```
+
+## Active Organization Required
+
+The decorator requires an active organization in the user's session:
+
+```ts title="org.controller.ts"
+import { Controller, Get } from "@nestjs/common";
+import { OrgRoles, Session, UserSession } from "@thallesp/nestjs-better-auth";
+
+@Controller("org")
+export class OrgController {
+  @OrgRoles(["admin"])
+  @Get("settings")
+  async getSettings(@Session() session: UserSession) {
+    // ✅ Users with activeOrganizationId AND org admin role can access
+    // ❌ Users without activeOrganizationId receive 403
+    // ❌ System admins without org context receive 403
+    const orgId = session.session.activeOrganizationId;
+    return { orgId };
+  }
+}
+```
+
+## Controller-Level Protection
+
+Apply role requirements to an entire controller:
+
+```ts title="org-admin.controller.ts"
+import { Controller, Get, Post } from "@nestjs/common";
+import { OrgRoles } from "@thallesp/nestjs-better-auth";
+
+@OrgRoles(["owner", "admin"])
+@Controller("org/admin")
+export class OrgAdminController {
+  // All routes require org owner or admin role
+
+  @Get("members")
+  async listMembers() {
+    return { members: [] };
+  }
+
+  @Post("members/:id/remove")
+  async removeMember() {
+    return { message: "Member removed" };
+  }
+}
+```
+
+## Security Model
+
+The `@OrgRoles()` decorator enforces organization-scoped role checking:
+
+```ts title="org.controller.ts"
+import { Controller, Get } from "@nestjs/common";
+import { OrgRoles } from "@thallesp/nestjs-better-auth";
+
+@Controller("org")
+export class OrgController {
+  @OrgRoles(["owner"])
+  @Get("dangerous-action")
+  async dangerousAction() {
+    // ✅ Organization owners can access
+    // ❌ Organization admins CANNOT access
+    // ❌ System admins without org owner role CANNOT access
+    // ❌ Users without active organization CANNOT access
+    return { message: "Action completed" };
+  }
+}
+```
+
+<Warning>
+  System admins (`user.role = 'admin'`) cannot access `@OrgRoles()` protected routes unless they are also members of the active organization with the required role.
+</Warning>
+
+## Managing Organization Members
+
+Add members to organizations with specific roles:
+
+```ts title="org-management.ts"
+import { auth } from "./auth";
+
+// Add a member with admin role
+await auth.api.addMember({
+  body: {
+    organizationId: "org-123",
+    userId: "user-456",
+    role: "admin", // Organization role
+  },
+});
+
+// User sets their active organization
+await auth.api.setActiveOrganization({
+  body: {
+    organizationId: "org-123",
+  },
+  headers: {
+    Authorization: `Bearer ${userToken}`,
+  },
+});
+```
+
+## Custom Organization Roles
+
+You can define custom roles in Better Auth's organization plugin:
+
+```ts title="auth.ts"
+import { betterAuth } from "better-auth";
+import { organization } from "better-auth/plugins/organization";
+
+export const auth = betterAuth({
+  plugins: [
+    organization({
+      // Define custom roles here if needed
+    }),
+  ],
+});
+```
+
+Then use them with `@OrgRoles()`:
+
+```ts
+@OrgRoles(["custom-role"])
+@Get("custom-action")
+async customAction() {
+  return { message: "Custom role action" };
+}
+```
+
+## Response Codes
+
+- **200**: User has required organization role and active organization
+- **401**: User is not authenticated
+- **403**: User is authenticated but lacks required role or has no active organization
+
+## Related
+
+<CardGroup cols={2}>
+  <Card title="System Roles" icon="shield-halved" href="/authorization/roles">
+    Use @Roles() for system-level role checks
+  </Card>
+  <Card title="Organization Permissions" icon="lock" href="/authorization/organization-permissions">
+    Use @MemberHasPermission() for fine-grained permission control
+  </Card>
+</CardGroup>

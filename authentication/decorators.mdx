@@ -1,0 +1,310 @@
+---
+title: Authentication Decorators
+description: Overview of all authentication decorators available in NestJS Better Auth
+---
+
+## Overview
+
+NestJS Better Auth provides several decorators to manage authentication and authorization in your application. These decorators work with the global `AuthGuard` to control access to routes and extract session data.
+
+## Session Decorator
+
+The `@Session()` decorator extracts the authenticated user's session from the request.
+
+### Basic Usage
+
+```typescript title="user.controller.ts"
+import { Controller, Get } from "@nestjs/common";
+import { Session, UserSession } from "@thallesp/nestjs-better-auth";
+
+@Controller("users")
+export class UserController {
+  @Get("me")
+  async getProfile(@Session() session: UserSession) {
+    return {
+      id: session.user.id,
+      email: session.user.email,
+      name: session.user.name,
+    };
+  }
+}
+```
+
+### Session Type
+
+The `UserSession` type includes:
+
+```typescript
+type UserSession = {
+  user: {
+    id: string;
+    email: string;
+    name: string;
+    role?: string | string[];
+    // ... other user fields
+  };
+  session: {
+    id: string;
+    userId: string;
+    expiresAt: Date;
+    activeOrganizationId?: string;
+    // ... other session fields
+  };
+};
+```
+
+### GraphQL Support
+
+The `@Session()` decorator works in GraphQL resolvers:
+
+```typescript title="user.resolver.ts"
+import { Query, Resolver } from "@nestjs/graphql";
+import { Session, UserSession } from "@thallesp/nestjs-better-auth";
+
+@Resolver()
+export class UserResolver {
+  @Query(() => User)
+  async me(@Session() session: UserSession) {
+    return session.user;
+  }
+}
+```
+
+### WebSocket Support
+
+The `@Session()` decorator also works in WebSocket gateways:
+
+```typescript title="chat.gateway.ts"
+import { SubscribeMessage, WebSocketGateway } from "@nestjs/websockets";
+import { Session, UserSession } from "@thallesp/nestjs-better-auth";
+
+@WebSocketGateway()
+export class ChatGateway {
+  @SubscribeMessage("message")
+  handleMessage(@Session() session: UserSession) {
+    return { userId: session.user.id };
+  }
+}
+```
+
+## AllowAnonymous Decorator
+
+The `@AllowAnonymous()` decorator bypasses authentication for specific routes or controllers.
+
+### Method-Level Usage
+
+```typescript title="public.controller.ts"
+import { Controller, Get } from "@nestjs/common";
+import { AllowAnonymous } from "@thallesp/nestjs-better-auth";
+
+@Controller("api")
+export class ApiController {
+  @AllowAnonymous()
+  @Get("health")
+  async healthCheck() {
+    // No authentication required
+    return { status: "ok" };
+  }
+
+  @AllowAnonymous()
+  @Get("version")
+  async version() {
+    return { version: "1.0.0" };
+  }
+}
+```
+
+### Class-Level Usage
+
+```typescript title="public.controller.ts"
+import { Controller, Get } from "@nestjs/common";
+import { AllowAnonymous } from "@thallesp/nestjs-better-auth";
+
+@AllowAnonymous() // All routes in this controller are public
+@Controller("public")
+export class PublicController {
+  @Get("about")
+  async about() {
+    return { page: "about" };
+  }
+
+  @Get("contact")
+  async contact() {
+    return { page: "contact" };
+  }
+}
+```
+
+### Common Use Cases
+
+- Health check endpoints
+- Public API endpoints
+- Landing pages
+- Documentation routes
+- Webhook receivers (before signature verification)
+
+<Tip>
+  See the [Anonymous Routes](/authentication/anonymous-routes) guide for more details.
+</Tip>
+
+## OptionalAuth Decorator
+
+The `@OptionalAuth()` decorator makes authentication optional, allowing both authenticated and unauthenticated access.
+
+### Method-Level Usage
+
+```typescript title="content.controller.ts"
+import { Controller, Get } from "@nestjs/common";
+import { OptionalAuth, Session, UserSession } from "@thallesp/nestjs-better-auth";
+
+@Controller("content")
+export class ContentController {
+  @OptionalAuth()
+  @Get("feed")
+  async getFeed(@Session() session: UserSession | null) {
+    if (session) {
+      // Personalized content for authenticated users
+      return { personalized: true, userId: session.user.id };
+    }
+    // Generic content for anonymous users
+    return { personalized: false };
+  }
+}
+```
+
+### Class-Level Usage
+
+```typescript title="content.controller.ts"
+import { Controller, Get } from "@nestjs/common";
+import { OptionalAuth, Session, UserSession } from "@thallesp/nestjs-better-auth";
+
+@OptionalAuth() // All routes have optional authentication
+@Controller("content")
+export class ContentController {
+  @Get("articles")
+  async getArticles(@Session() session: UserSession | null) {
+    // Check if user is authenticated
+    const isAuthenticated = !!session;
+    return { articles: [], isAuthenticated };
+  }
+}
+```
+
+### Checking Authentication Status
+
+```typescript
+@OptionalAuth()
+@Get("profile")
+async getProfile(@Session() session: UserSession | null) {
+  if (!session) {
+    return { message: "Please log in to view your profile" };
+  }
+  return session.user;
+}
+```
+
+### Common Use Cases
+
+- Content that's enhanced for logged-in users
+- Pages with optional personalization
+- Mixed public/private data
+- Guest checkout flows
+
+<Tip>
+  See the [Optional Auth](/authentication/optional-auth) guide for more details.
+</Tip>
+
+## Request Object Access
+
+Session data is also available through the request object:
+
+```typescript title="user.controller.ts"
+import { Controller, Get, Request } from "@nestjs/common";
+import type { Request as ExpressRequest } from "express";
+import type { UserSession } from "@thallesp/nestjs-better-auth";
+
+@Controller("users")
+export class UserController {
+  @Get("me")
+  async getProfile(@Request() req: ExpressRequest & { session: UserSession; user: UserSession["user"] }) {
+    return {
+      session: req.session, // Full session object
+      user: req.user, // Direct user reference (useful for Sentry)
+    };
+  }
+}
+```
+
+The request object provides:
+- `req.session` - The full session object
+- `req.user` - Direct reference to the user (useful for observability tools)
+
+## Deprecated Decorators
+
+These decorators are deprecated but still supported:
+
+```typescript
+import { Public, Optional } from "@thallesp/nestjs-better-auth";
+
+// ❌ Deprecated - use @AllowAnonymous() instead
+@Public()
+
+// ❌ Deprecated - use @OptionalAuth() instead
+@Optional()
+```
+
+<Warning>
+  Use `@AllowAnonymous()` and `@OptionalAuth()` instead of the deprecated `@Public()` and `@Optional()` decorators.
+</Warning>
+
+## Authorization Decorators
+
+For role-based and permission-based access control, see the Authorization guides:
+
+<CardGroup cols={2}>
+  <Card title="@Roles()" icon="user-shield" href="/authorization/roles">
+    System-level role checks (admin plugin)
+  </Card>
+  <Card title="@OrgRoles()" icon="users" href="/authorization/organization-roles">
+    Organization-level role checks
+  </Card>
+  <Card title="@UserHasPermission()" icon="key" href="/authorization/permissions">
+    User-level permission checks
+  </Card>
+  <Card title="@MemberHasPermission()" icon="shield-check" href="/authorization/organization-permissions">
+    Organization member permission checks
+  </Card>
+</CardGroup>
+
+## Decorator Precedence
+
+When multiple decorators are applied, they are evaluated in this order:
+
+1. **@AllowAnonymous()** - If present, skip all authentication
+2. **@OptionalAuth()** - If present and no session, allow access
+3. **Authentication check** - Require valid session
+4. **@Roles()** - Check user.role
+5. **@OrgRoles()** - Check organization member role
+6. **@UserHasPermission()** - Check user permissions
+7. **@MemberHasPermission()** - Check organization member permissions
+
+<Note>
+  Method-level decorators always override class-level decorators using `getAllAndOverride` from NestJS Reflector.
+</Note>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Route Protection" icon="shield" href="/authentication/route-protection">
+    Learn about the global AuthGuard
+  </Card>
+  <Card title="Anonymous Routes" icon="lock-open" href="/authentication/anonymous-routes">
+    Deep dive into @AllowAnonymous()
+  </Card>
+  <Card title="Optional Auth" icon="shield-halved" href="/authentication/optional-auth">
+    Make authentication optional for routes
+  </Card>
+  <Card title="Authorization" icon="user-shield" href="/authorization/roles">
+    Add role-based and permission-based access control
+  </Card>
+</CardGroup>

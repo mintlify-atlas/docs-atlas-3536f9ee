@@ -1,0 +1,337 @@
+---
+title: '@BeforeHook'
+description: Registers a method to be executed before a specific auth route is processed
+---
+
+## Overview
+
+`@BeforeHook()` is a method decorator that registers a function to execute **before** a Better Auth route is processed. It's useful for validation, security checks, logging, and modifying request data.
+
+## Type Signature
+
+```typescript
+export const BeforeHook = (path?: `/${string}`): CustomDecorator<symbol> =>
+  SetMetadata(BEFORE_HOOK_KEY, path);
+```
+
+## Parameters
+
+<ParamField path="path" type="`/${string}` | undefined">
+  The auth route path to hook into (must start with '/'). If omitted, the hook runs for **all** auth routes.
+  
+  Examples: `/sign-in/email`, `/sign-up/email`, `/verify-email`
+</ParamField>
+
+## Usage
+
+### Specific Route
+
+```typescript
+import { Injectable } from '@nestjs/common';
+import { Hook, BeforeHook } from '@better-auth/nestjs';
+import type { AuthHookContext } from '@better-auth/nestjs';
+
+@Hook()
+@Injectable()
+export class AuthHooks {
+  @BeforeHook('/sign-in/email')
+  async beforeSignIn(ctx: AuthHookContext) {
+    console.log('User attempting sign in:', ctx.body.email);
+  }
+}
+```
+
+### All Routes
+
+```typescript
+@Hook()
+@Injectable()
+export class AuthHooks {
+  @BeforeHook() // No path = all routes
+  async logAllRequests(ctx: AuthHookContext) {
+    console.log('Auth request:', ctx.path, ctx.body);
+  }
+}
+```
+
+### Multiple Hooks
+
+```typescript
+@Hook()
+@Injectable()
+export class AuthHooks {
+  @BeforeHook('/sign-in/email')
+  async beforeEmailSignIn(ctx: AuthHookContext) {
+    console.log('Email sign in');
+  }
+
+  @BeforeHook('/sign-in/social')
+  async beforeSocialSignIn(ctx: AuthHookContext) {
+    console.log('Social sign in');
+  }
+
+  @BeforeHook('/sign-up/email')
+  async beforeSignUp(ctx: AuthHookContext) {
+    console.log('Sign up');
+  }
+}
+```
+
+## Examples
+
+### Security: Prevent Banned Users
+
+```typescript
+import { UnauthorizedException } from '@nestjs/common';
+import { Hook, BeforeHook } from '@better-auth/nestjs';
+
+@Hook()
+@Injectable()
+export class SecurityHooks {
+  constructor(private securityService: SecurityService) {}
+
+  @BeforeHook('/sign-in/email')
+  async checkBannedUser(ctx: AuthHookContext) {
+    const { email } = ctx.body;
+    const isBanned = await this.securityService.isUserBanned(email);
+    
+    if (isBanned) {
+      throw new UnauthorizedException('Your account has been banned');
+    }
+  }
+}
+```
+
+### Validation: Email Domain Whitelist
+
+```typescript
+import { BadRequestException } from '@nestjs/common';
+
+@Hook()
+@Injectable()
+export class ValidationHooks {
+  @BeforeHook('/sign-up/email')
+  async validateEmailDomain(ctx: AuthHookContext) {
+    const { email } = ctx.body;
+    const allowedDomains = ['company.com', 'partner.com'];
+    const domain = email.split('@')[1];
+    
+    if (!allowedDomains.includes(domain)) {
+      throw new BadRequestException(
+        `Only ${allowedDomains.join(', ')} emails are allowed`
+      );
+    }
+  }
+}
+```
+
+### Rate Limiting
+
+```typescript
+import { TooManyRequestsException } from '@nestjs/common';
+
+@Hook()
+@Injectable()
+export class RateLimitHooks {
+  constructor(private rateLimiter: RateLimiterService) {}
+
+  @BeforeHook('/sign-in/email')
+  async checkRateLimit(ctx: AuthHookContext) {
+    const { email } = ctx.body;
+    const isLimited = await this.rateLimiter.isLimited(email);
+    
+    if (isLimited) {
+      throw new TooManyRequestsException(
+        'Too many sign-in attempts. Please try again later.'
+      );
+    }
+    
+    await this.rateLimiter.increment(email);
+  }
+}
+```
+
+### Logging
+
+```typescript
+@Hook()
+@Injectable()
+export class LoggingHooks {
+  constructor(private logger: LoggerService) {}
+
+  @BeforeHook() // All routes
+  async logRequest(ctx: AuthHookContext) {
+    this.logger.log(`Auth request: ${ctx.path}`, {
+      path: ctx.path,
+      method: ctx.method,
+      body: ctx.body,
+      timestamp: new Date(),
+    });
+  }
+}
+```
+
+### Custom Validation
+
+```typescript
+@Hook()
+@Injectable()
+export class CustomValidationHooks {
+  @BeforeHook('/sign-up/email')
+  async validatePassword(ctx: AuthHookContext) {
+    const { password } = ctx.body;
+    
+    if (password.length < 12) {
+      throw new BadRequestException(
+        'Password must be at least 12 characters'
+      );
+    }
+    
+    if (!/[A-Z]/.test(password)) {
+      throw new BadRequestException(
+        'Password must contain at least one uppercase letter'
+      );
+    }
+    
+    if (!/[0-9]/.test(password)) {
+      throw new BadRequestException(
+        'Password must contain at least one number'
+      );
+    }
+  }
+}
+```
+
+### Modifying Request Data
+
+```typescript
+@Hook()
+@Injectable()
+export class DataModificationHooks {
+  @BeforeHook('/sign-up/email')
+  async normalizeEmail(ctx: AuthHookContext) {
+    // Normalize email to lowercase
+    if (ctx.body.email) {
+      ctx.body.email = ctx.body.email.toLowerCase().trim();
+    }
+  }
+
+  @BeforeHook('/sign-up/email')
+  async addMetadata(ctx: AuthHookContext) {
+    // Add signup source
+    ctx.body.metadata = {
+      ...ctx.body.metadata,
+      signupSource: 'web',
+      signupDate: new Date().toISOString(),
+    };
+  }
+}
+```
+
+### IP-Based Restrictions
+
+```typescript
+@Hook()
+@Injectable()
+export class IpRestrictionHooks {
+  constructor(private geoService: GeoService) {}
+
+  @BeforeHook('/sign-in/email')
+  async checkLocation(ctx: AuthHookContext) {
+    const ip = ctx.request.ip;
+    const country = await this.geoService.getCountry(ip);
+    const blockedCountries = ['CN', 'RU'];
+    
+    if (blockedCountries.includes(country)) {
+      throw new UnauthorizedException(
+        'Sign in from your location is not allowed'
+      );
+    }
+  }
+}
+```
+
+## Hook Context
+
+The `ctx` parameter provides access to:
+
+<ResponseField name="path" type="string">
+  The auth route path (e.g., `/sign-in/email`)
+</ResponseField>
+
+<ResponseField name="method" type="string">
+  HTTP method (e.g., `POST`, `GET`)
+</ResponseField>
+
+<ResponseField name="body" type="Record<string, any>">
+  Request body data
+</ResponseField>
+
+<ResponseField name="headers" type="Headers">
+  Request headers
+</ResponseField>
+
+<ResponseField name="request" type="Request">
+  Full request object
+</ResponseField>
+
+## Execution Order
+
+1. **Global before hooks** (no path specified)
+2. **Route-specific before hooks** (matching path)
+3. **Better Auth handler** processes the request
+4. After hooks execute (see `@AfterHook`)
+
+## Error Handling
+
+Throwing errors in before hooks **prevents** the auth route from executing:
+
+```typescript
+@BeforeHook('/sign-in/email')
+async validate(ctx: AuthHookContext) {
+  if (someCondition) {
+    throw new UnauthorizedException('Access denied');
+    // Auth route will NOT execute
+  }
+  // Route continues if no error thrown
+}
+```
+
+## Common Auth Paths
+
+- `/sign-in/email` - Email/password sign in
+- `/sign-up/email` - Email/password sign up
+- `/sign-in/social` - Social provider sign in
+- `/verify-email` - Email verification
+- `/reset-password` - Password reset request
+- `/update-password` - Password update
+- `/sign-out` - Sign out
+
+## Requirements
+
+- Must be used in a class decorated with `@Hook()`
+- Class must be an `@Injectable()` provider
+- Better Auth must have `hooks: {}` configured
+
+## Notes
+
+- Hooks are async and support `await`
+- Path must start with `/` if provided
+- Omit path to run on all auth routes
+- Throwing errors prevents route execution
+- Multiple hooks can target the same route
+- Execution order: global hooks → specific hooks → auth handler
+
+## Related
+
+<CardGroup cols={3}>
+  <Card title="@AfterHook" href="/api/decorators/after-hook" icon="arrow-left">
+    Execute after auth routes
+  </Card>
+  <Card title="@Hook" href="/api/decorators/hook" icon="webhook">
+    Mark class as hook provider
+  </Card>
+  <Card title="AuthHookContext" href="/api/types/auth-hook-context" icon="circle-info">
+    Hook context type
+  </Card>
+</CardGroup>

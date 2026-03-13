@@ -1,0 +1,444 @@
+---
+title: 'UserSession'
+description: Type representing a valid user session after authentication
+---
+
+## Overview
+
+`UserSession` is the TypeScript type for authenticated user sessions in NestJS Better Auth. It's extracted by the `@Session()` decorator and attached to requests by the `AuthGuard`.
+
+## Type Definition
+
+```typescript
+export type BaseUserSession = NonNullable<
+  Awaited<ReturnType<ReturnType<typeof getSession>>>
+>;
+
+export type UserSession = BaseUserSession & {
+  user: BaseUserSession["user"] & {
+    role?: string | string[];
+  };
+  session: BaseUserSession["session"] & {
+    activeOrganizationId?: string;
+  };
+};
+```
+
+## Structure
+
+<ResponseField name="user" type="object" required>
+  User information from the authenticated session
+  
+  <Expandable title="properties">
+    <ResponseField name="id" type="string" required>
+      Unique user identifier
+    </ResponseField>
+    
+    <ResponseField name="email" type="string" required>
+      User's email address
+    </ResponseField>
+    
+    <ResponseField name="name" type="string" required>
+      User's display name
+    </ResponseField>
+    
+    <ResponseField name="emailVerified" type="boolean" required>
+      Whether the email has been verified
+    </ResponseField>
+    
+    <ResponseField name="image" type="string | null">
+      User's profile image URL
+    </ResponseField>
+    
+    <ResponseField name="createdAt" type="Date" required>
+      Account creation timestamp
+    </ResponseField>
+    
+    <ResponseField name="updatedAt" type="Date" required>
+      Last update timestamp
+    </ResponseField>
+    
+    <ResponseField name="role" type="string | string[] | undefined">
+      User's role(s). Available when Better Auth admin plugin is enabled.
+      
+      - Single role: `'admin'`
+      - Multiple roles: `['admin', 'moderator']`
+      - Comma-separated: `'admin,moderator'`
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="session" type="object" required>
+  Session metadata
+  
+  <Expandable title="properties">
+    <ResponseField name="id" type="string" required>
+      Unique session identifier
+    </ResponseField>
+    
+    <ResponseField name="userId" type="string" required>
+      ID of the user this session belongs to
+    </ResponseField>
+    
+    <ResponseField name="expiresAt" type="Date" required>
+      When the session expires
+    </ResponseField>
+    
+    <ResponseField name="token" type="string" required>
+      Session token used for authentication
+    </ResponseField>
+    
+    <ResponseField name="ipAddress" type="string | null">
+      IP address from which the session was created
+    </ResponseField>
+    
+    <ResponseField name="userAgent" type="string | null">
+      User agent string from session creation
+    </ResponseField>
+    
+    <ResponseField name="activeOrganizationId" type="string | undefined">
+      ID of the currently active organization. Available when Better Auth organization plugin is enabled.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+## Usage
+
+### Basic Usage
+
+```typescript
+import { Controller, Get } from '@nestjs/common';
+import { Session } from '@better-auth/nestjs';
+import type { UserSession } from '@better-auth/nestjs';
+
+@Controller('api')
+export class ApiController {
+  @Get('me')
+  getCurrentUser(@Session() session: UserSession) {
+    return {
+      id: session.user.id,
+      email: session.user.email,
+      name: session.user.name,
+    };
+  }
+}
+```
+
+### Accessing User Properties
+
+```typescript
+@Get('profile')
+getProfile(@Session() session: UserSession) {
+  const { user } = session;
+  
+  return {
+    // Basic user info
+    id: user.id,
+    email: user.email,
+    name: user.name,
+    
+    // Verification status
+    emailVerified: user.emailVerified,
+    
+    // Profile image
+    avatar: user.image ?? '/default-avatar.png',
+    
+    // Timestamps
+    memberSince: user.createdAt,
+    lastUpdated: user.updatedAt,
+    
+    // Role (if admin plugin enabled)
+    role: user.role,
+  };
+}
+```
+
+### Accessing Session Properties
+
+```typescript
+@Get('session-info')
+getSessionInfo(@Session() session: UserSession) {
+  const { session: sessionData } = session;
+  
+  return {
+    sessionId: sessionData.id,
+    expiresAt: sessionData.expiresAt,
+    ipAddress: sessionData.ipAddress,
+    userAgent: sessionData.userAgent,
+    activeOrganization: sessionData.activeOrganizationId,
+  };
+}
+```
+
+### With Optional Authentication
+
+```typescript
+import { OptionalAuth } from '@better-auth/nestjs';
+
+@OptionalAuth()
+@Get('posts')
+getPosts(@Session() session: UserSession | null) {
+  if (session) {
+    // Authenticated - show personalized posts
+    return this.postsService.getPersonalized(session.user.id);
+  }
+  
+  // Anonymous - show public posts
+  return this.postsService.getPublic();
+}
+```
+
+## Working with Roles
+
+### Checking Single Role
+
+```typescript
+@Get('admin')
+checkAdmin(@Session() session: UserSession) {
+  const role = session.user.role;
+  
+  if (role === 'admin') {
+    return 'User is admin';
+  }
+  
+  throw new ForbiddenException('Admin access required');
+}
+```
+
+### Checking Multiple Roles
+
+```typescript
+function hasRole(session: UserSession, allowedRoles: string[]): boolean {
+  const { role } = session.user;
+  
+  if (!role) return false;
+  
+  // Handle array of roles
+  if (Array.isArray(role)) {
+    return role.some(r => allowedRoles.includes(r));
+  }
+  
+  // Handle comma-separated roles
+  if (typeof role === 'string') {
+    return role.split(',').some(r => allowedRoles.includes(r.trim()));
+  }
+  
+  return false;
+}
+
+@Get('moderator-panel')
+moderatorPanel(@Session() session: UserSession) {
+  if (hasRole(session, ['admin', 'moderator'])) {
+    return 'Access granted';
+  }
+  throw new ForbiddenException();
+}
+```
+
+## Working with Organizations
+
+### Getting Active Organization
+
+```typescript
+@Get('organization/data')
+getOrgData(@Session() session: UserSession) {
+  const orgId = session.session.activeOrganizationId;
+  
+  if (!orgId) {
+    throw new BadRequestException('No active organization');
+  }
+  
+  return this.organizationService.getData(orgId);
+}
+```
+
+### Organization-Scoped Queries
+
+```typescript
+@Get('projects')
+async getProjects(@Session() session: UserSession) {
+  const orgId = session.session.activeOrganizationId;
+  
+  if (orgId) {
+    // Return organization projects
+    return this.projectsService.findByOrganization(orgId);
+  }
+  
+  // Return personal projects
+  return this.projectsService.findByUser(session.user.id);
+}
+```
+
+## Common Patterns
+
+### Extracting User ID
+
+```typescript
+@Post('posts')
+createPost(
+  @Body() dto: CreatePostDto,
+  @Session() session: UserSession,
+) {
+  return this.postsService.create({
+    ...dto,
+    authorId: session.user.id,
+  });
+}
+```
+
+### Owner Validation
+
+```typescript
+@Delete('posts/:id')
+async deletePost(
+  @Param('id') id: string,
+  @Session() session: UserSession,
+) {
+  const post = await this.postsService.findOne(id);
+  
+  if (post.authorId !== session.user.id) {
+    throw new ForbiddenException('You can only delete your own posts');
+  }
+  
+  return this.postsService.delete(id);
+}
+```
+
+### Audit Logging
+
+```typescript
+@Post('important-action')
+async performAction(
+  @Body() dto: ActionDto,
+  @Session() session: UserSession,
+) {
+  await this.auditLog.create({
+    userId: session.user.id,
+    userEmail: session.user.email,
+    action: 'important-action',
+    sessionId: session.session.id,
+    ipAddress: session.session.ipAddress,
+    timestamp: new Date(),
+  });
+  
+  return this.actionService.perform(dto);
+}
+```
+
+### Passing to Services
+
+```typescript
+// Controller
+@Controller('orders')
+export class OrdersController {
+  constructor(private ordersService: OrdersService) {}
+
+  @Post()
+  create(
+    @Body() dto: CreateOrderDto,
+    @Session() session: UserSession,
+  ) {
+    return this.ordersService.create(dto, session);
+  }
+}
+
+// Service
+@Injectable()
+export class OrdersService {
+  create(dto: CreateOrderDto, session: UserSession) {
+    return this.db.order.create({
+      data: {
+        ...dto,
+        userId: session.user.id,
+        userEmail: session.user.email,
+      },
+    });
+  }
+}
+```
+
+## Type Guards
+
+### Checking Session Nullability
+
+```typescript
+function isAuthenticated(
+  session: UserSession | null
+): session is UserSession {
+  return session !== null;
+}
+
+@OptionalAuth()
+@Get('data')
+getData(@Session() session: UserSession | null) {
+  if (isAuthenticated(session)) {
+    // TypeScript knows session is UserSession
+    return this.service.getForUser(session.user.id);
+  }
+  
+  return this.service.getPublic();
+}
+```
+
+### Checking Role Presence
+
+```typescript
+function hasRoleField(
+  session: UserSession
+): session is UserSession & { user: { role: string | string[] } } {
+  return session.user.role !== undefined;
+}
+
+@Get('admin-check')
+checkRole(@Session() session: UserSession) {
+  if (hasRoleField(session)) {
+    // TypeScript knows role is defined
+    return { role: session.user.role };
+  }
+  
+  return { role: null };
+}
+```
+
+## Plugin Extensions
+
+The session type extends based on enabled plugins:
+
+### Admin Plugin
+
+Adds `user.role` field:
+
+```typescript
+session.user.role // string | string[] | undefined
+```
+
+### Organization Plugin
+
+Adds `session.activeOrganizationId` field:
+
+```typescript
+session.session.activeOrganizationId // string | undefined
+```
+
+## Notes
+
+- Session is `null` when using `@OptionalAuth()` without authentication
+- Session is `null` when using `@AllowAnonymous()` without authentication
+- Session is always present (non-null) on protected routes
+- The `role` field requires Better Auth admin plugin
+- The `activeOrganizationId` field requires Better Auth organization plugin
+- All timestamps are `Date` objects
+
+## Related
+
+<CardGroup cols={3}>
+  <Card title="@Session" href="/api/decorators/session" icon="user">
+    Session decorator
+  </Card>
+  <Card title="AuthGuard" href="/api/auth-guard" icon="shield">
+    Authentication guard
+  </Card>
+  <Card title="@OptionalAuth" href="/api/decorators/optional-auth" icon="lock-open">
+    Optional authentication
+  </Card>
+</CardGroup>

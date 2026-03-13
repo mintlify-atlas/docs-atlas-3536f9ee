@@ -1,0 +1,342 @@
+---
+title: "CORS Configuration"
+description: "Configure Cross-Origin Resource Sharing for Better Auth routes"
+---
+
+## Overview
+
+Better Auth routes require special CORS handling, especially when using the `trustedOrigins` option. This library automatically applies CORS headers to Better Auth routes based on your configuration.
+
+## Basic Setup
+
+Configure `trustedOrigins` in your Better Auth config:
+
+```ts title="auth.ts"
+import { betterAuth } from "better-auth";
+
+export const auth = betterAuth({
+  basePath: "/api/auth",
+  trustedOrigins: [
+    "http://localhost:3000",
+    "https://app.example.com",
+  ],
+});
+```
+
+The library will automatically apply CORS to Better Auth routes:
+
+```ts title="app.module.ts"
+import { Module } from "@nestjs/common";
+import { AuthModule } from "@thallesp/nestjs-better-auth";
+import { auth } from "./auth";
+
+@Module({
+  imports: [
+    AuthModule.forRoot({ auth }), // CORS is automatically configured
+  ],
+})
+export class AppModule {}
+```
+
+## How It Works
+
+When you configure `trustedOrigins`, the library:
+
+1. **Validates the origin** against the trusted origins list
+2. **Sets CORS headers** for matching origins:
+   - `Access-Control-Allow-Origin`: The matching origin
+   - `Access-Control-Allow-Credentials`: `true`
+   - `Vary`: `Origin`
+3. **Handles preflight requests** (OPTIONS) with appropriate headers
+
+## Trusted Origins Patterns
+
+### Exact Origins
+
+```ts
+export const auth = betterAuth({
+  trustedOrigins: [
+    "http://localhost:3000",
+    "https://app.example.com",
+  ],
+});
+```
+
+### Wildcard Patterns
+
+```ts
+export const auth = betterAuth({
+  trustedOrigins: [
+    "http://localhost:*",      // Matches any port
+    "https://*.example.com",    // Matches any subdomain
+  ],
+});
+```
+
+### Multiple Environments
+
+```ts
+export const auth = betterAuth({
+  trustedOrigins: [
+    "http://localhost:3000",           // Development
+    "https://staging.example.com",     // Staging
+    "https://app.example.com",         // Production
+  ],
+});
+```
+
+## Fastify-Specific Behavior
+
+On Fastify, Better Auth routes are served through middleware, which means app-level `@fastify/cors` doesn't fully apply to them. This library handles CORS automatically for Better Auth routes.
+
+### Automatic CORS Registration
+
+The library registers CORS for Better Auth routes:
+
+```ts
+AuthModule.forRoot({ auth }) // Automatically handles CORS on Fastify
+```
+
+### Duplicate CORS Detection
+
+If you already have `@fastify/cors` registered, the library detects it and logs a warning:
+
+```ts title="main.ts"
+import cors from "@fastify/cors";
+
+const app = await NestFactory.create<NestFastifyApplication>(
+  AppModule,
+  new FastifyAdapter()
+);
+
+// This will be detected
+await app.register(cors, {
+  origin: ["http://localhost:3000"],
+  credentials: true,
+});
+```
+
+**Warning message:**
+
+```
+Detected an existing @fastify/cors registration. Skipping automatic Fastify CORS 
+registration for Better Auth trustedOrigins to avoid duplicate plugin registration. 
+Better Auth routes will still apply CORS from trustedOrigins. Set 
+disableTrustedOriginsCors: true if you want to fully manage Better Auth CORS yourself.
+```
+
+The library will skip duplicate registration but still apply CORS headers to Better Auth routes.
+
+### Manual CORS Management
+
+If you want to fully manage CORS yourself:
+
+```ts
+import cors from "@fastify/cors";
+
+// In main.ts
+await app.register(cors, {
+  origin: ["http://localhost:3000"],
+  credentials: true,
+});
+
+// In app.module.ts
+AuthModule.forRoot({
+  auth,
+  disableTrustedOriginsCors: true, // Disable automatic CORS
+})
+```
+
+<Warning>
+  When you disable automatic CORS with `disableTrustedOriginsCors: true`, you're responsible for ensuring Better Auth routes have proper CORS configuration.
+</Warning>
+
+## Disabling Automatic CORS
+
+You can disable automatic CORS handling:
+
+```ts
+AuthModule.forRoot({
+  auth,
+  disableTrustedOriginsCors: true,
+})
+```
+
+Use this when:
+
+- You want to fully manage CORS yourself
+- You have custom CORS requirements
+- You're using a custom middleware for CORS
+
+## Configuration Options
+
+### disableTrustedOriginsCors
+
+**Type:** `boolean`  
+**Default:** `false`
+
+Disables automatic CORS configuration for Better Auth routes.
+
+```ts
+AuthModule.forRoot({
+  auth,
+  disableTrustedOriginsCors: true,
+})
+```
+
+## CORS Headers
+
+### Successful Origin Match
+
+When the request origin matches a trusted origin:
+
+```http
+Access-Control-Allow-Origin: http://localhost:3000
+Access-Control-Allow-Credentials: true
+Vary: Origin
+```
+
+### Preflight Request (OPTIONS)
+
+For preflight requests:
+
+```http
+Access-Control-Allow-Origin: http://localhost:3000
+Access-Control-Allow-Credentials: true
+Access-Control-Allow-Methods: GET,HEAD,POST,PUT,PATCH,DELETE,OPTIONS
+Access-Control-Allow-Headers: content-type, stripe-signature
+Vary: Origin, Access-Control-Request-Headers
+```
+
+### No Match
+
+When the request origin doesn't match any trusted origins, no CORS headers are added.
+
+## Testing CORS
+
+### Test Preflight Request
+
+```bash
+curl -X OPTIONS http://localhost:3000/api/auth/sign-in/email \
+  -H "Origin: http://localhost:3000" \
+  -H "Access-Control-Request-Method: POST" \
+  -H "Access-Control-Request-Headers: content-type" \
+  -v
+```
+
+### Test Actual Request
+
+```bash
+curl -X GET http://localhost:3000/api/auth/ok \
+  -H "Origin: http://localhost:3000" \
+  -v
+```
+
+## Common Patterns
+
+### Development + Production
+
+```ts
+export const auth = betterAuth({
+  trustedOrigins: [
+    // Development
+    "http://localhost:3000",
+    "http://localhost:3001",
+    // Production
+    "https://app.example.com",
+    "https://admin.example.com",
+  ],
+});
+```
+
+### Environment-Based Configuration
+
+```ts
+const trustedOrigins = process.env.NODE_ENV === 'production'
+  ? ['https://app.example.com']
+  : ['http://localhost:3000', 'http://localhost:3001'];
+
+export const auth = betterAuth({
+  trustedOrigins,
+});
+```
+
+### Wildcard for Development
+
+```ts
+export const auth = betterAuth({
+  trustedOrigins: [
+    process.env.NODE_ENV === 'production'
+      ? 'https://app.example.com'
+      : 'http://localhost:*',  // Any port in development
+  ],
+});
+```
+
+## Limitations
+
+### Function-Based Origins Not Supported
+
+Better Auth supports function-based `trustedOrigins`, but this library does not:
+
+```ts
+// ❌ Not supported in NestJS
+export const auth = betterAuth({
+  trustedOrigins: (origin) => {
+    return origin.endsWith('.example.com');
+  },
+});
+```
+
+If you try to use function-based origins, you'll get an error:
+
+```
+Function-based trustedOrigins not supported in NestJS. Use string array or 
+disable CORS with disableTrustedOriginsCors: true.
+```
+
+**Workaround:** Use wildcard patterns or disable automatic CORS and implement your own.
+
+## Express vs Fastify
+
+### Express
+
+On Express, CORS is straightforward:
+
+```ts
+AuthModule.forRoot({ auth })
+// CORS headers are added by Better Auth's handler
+```
+
+### Fastify
+
+On Fastify, the library handles additional complexity:
+
+- Detects existing `@fastify/cors` registration
+- Registers CORS plugin if not present
+- Applies CORS middleware for Better Auth routes
+- Handles preflight requests specially
+
+## Troubleshooting
+
+### CORS Errors Despite Configuration
+
+1. **Check origin spelling** - Origins must match exactly (including protocol and port)
+2. **Check for function-based origins** - Not supported, use string arrays
+3. **Verify trustedOrigins is set** - Must be in Better Auth config
+4. **Check for custom middleware** - Ensure it doesn't interfere with CORS headers
+
+### Duplicate CORS Headers on Fastify
+
+If you see duplicate CORS headers:
+
+1. **Check for @fastify/cors** - The library will log a warning
+2. **Use disableTrustedOriginsCors** - Manage CORS yourself if needed
+
+### Preflight Requests Failing
+
+If OPTIONS requests fail:
+
+1. **Check CORS plugin** - Ensure CORS is properly configured
+2. **Check headers** - Verify `Access-Control-Request-Headers` are allowed
+3. **Test with curl** - Use the test commands above to diagnose

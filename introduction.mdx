@@ -1,0 +1,137 @@
+---
+title: Introduction
+description: A comprehensive NestJS integration library for Better Auth that brings seamless authentication and authorization to your NestJS applications
+---
+
+## What is NestJS Better Auth?
+
+NestJS Better Auth is a comprehensive integration library that brings [Better Auth](https://www.better-auth.com/) to NestJS applications. It provides a seamless authentication and authorization experience with full support for NestJS's dependency injection, decorators, and modular architecture.
+
+## Why NestJS Better Auth?
+
+Better Auth is a powerful authentication framework, but integrating it with NestJS requires careful handling of middleware, request parsing, guards, and session management. This library solves all integration challenges and provides:
+
+<CardGroup cols={2}>
+  <Card title="Zero-Config Integration" icon="bolt">
+    Import `AuthModule`, pass your Better Auth instance, and you're ready to go. The library handles all the complex middleware setup automatically.
+  </Card>
+  
+  <Card title="Global Route Protection" icon="shield">
+    Routes are protected by default with `AuthGuard`. Use `@AllowAnonymous()` or `@OptionalAuth()` decorators to control access.
+  </Card>
+  
+  <Card title="Type-Safe Decorators" icon="code">
+    Extract session data with `@Session()`, control access with `@Roles()`, `@OrgRoles()`, and implement fine-grained permissions with `@UserHasPermission()` and `@MemberHasPermission()`.
+  </Card>
+  
+  <Card title="Full Stack Support" icon="layer-group">
+    Works seamlessly with REST, GraphQL, and WebSocket connections. The same decorators and guards work across all protocols.
+  </Card>
+  
+  <Card title="NestJS Hooks" icon="webhook">
+    Create Better Auth hooks as NestJS services with full dependency injection support using `@Hook()`, `@BeforeHook()`, and `@AfterHook()`.
+  </Card>
+  
+  <Card title="Dual Adapter Support" icon="server">
+    Works with both Express and Fastify adapters. The library automatically detects and configures the right adapter.
+  </Card>
+</CardGroup>
+
+## Key Features
+
+### Session Management
+
+Access authenticated user sessions in your controllers, resolvers, and gateways:
+
+```typescript
+@Controller('users')
+export class UserController {
+  @Get('me')
+  async getProfile(@Session() session: UserSession) {
+    return session.user;
+  }
+}
+```
+
+### Role-Based Access Control
+
+Protect routes with system-level roles (`@Roles()`) or organization-level roles (`@OrgRoles()`):
+
+```typescript
+@Roles(['admin'])
+@Get('admin/dashboard')
+adminDashboard() {
+  return { message: 'System admin only' };
+}
+
+@OrgRoles(['owner', 'admin'])
+@Get('org/settings')
+orgSettings() {
+  return { message: 'Organization owners and admins only' };
+}
+```
+
+### Permission-Based Access Control
+
+Implement fine-grained access control with Better Auth's access control system:
+
+```typescript
+@UserHasPermission({ permission: { project: ['create', 'update'] } })
+@Post('projects')
+createProject() {
+  return { message: 'Project created' };
+}
+```
+
+### Hook System
+
+Create Better Auth hooks as NestJS services with dependency injection:
+
+```typescript
+@Hook()
+@Injectable()
+export class SignUpHook {
+  constructor(private readonly emailService: EmailService) {}
+
+  @BeforeHook('/sign-up/email')
+  async handle(ctx: AuthHookContext) {
+    await this.emailService.validateDomain(ctx.body.email);
+  }
+}
+```
+
+## Prerequisites
+
+Before using this library, ensure you have:
+
+- **NestJS** application (v11.1.6 or higher)
+- **Better Auth** installed and configured (v1.5.0 or higher)
+- **Node.js** 22.22.1 or higher
+
+<Warning>
+  Better Auth versions below 1.5.0 are deprecated and unsupported. Always use the latest version.
+</Warning>
+
+## What's Next?
+
+<CardGroup cols={2}>
+  <Card title="Installation" icon="download" href="/installation">
+    Install the library and set up peer dependencies
+  </Card>
+  
+  <Card title="Quick Start" icon="rocket" href="/quickstart">
+    Get your first authenticated endpoint running in minutes
+  </Card>
+</CardGroup>
+
+## Learn More
+
+<CardGroup cols={2}>
+  <Card title="Better Auth Documentation" icon="book" href="https://www.better-auth.com/docs">
+    Learn about Better Auth configuration and plugins
+  </Card>
+  
+  <Card title="NestJS Documentation" icon="book" href="https://docs.nestjs.com">
+    Explore NestJS framework features
+  </Card>
+</CardGroup>

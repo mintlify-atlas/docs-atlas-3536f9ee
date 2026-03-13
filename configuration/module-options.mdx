@@ -1,0 +1,341 @@
+---
+title: Module Options
+description: Complete reference for AuthModule.forRoot() configuration options
+---
+
+When configuring `AuthModule.forRoot()`, you can customize the module's behavior with several options. All options are optional unless otherwise noted.
+
+## Basic Usage
+
+```typescript title="app.module.ts"
+import { Module } from "@nestjs/common";
+import { AuthModule } from "@thallesp/nestjs-better-auth";
+import { auth } from "./auth";
+
+@Module({
+  imports: [
+    AuthModule.forRoot({
+      auth,
+      bodyParser: {
+        json: { limit: "2mb" },
+        urlencoded: { limit: "2mb", extended: true },
+        rawBody: true,
+      },
+    }),
+  ],
+})
+export class AppModule {}
+```
+
+## Configuration Options
+
+<ParamField path="auth" type="Auth" required>
+  Your Better Auth instance created with `betterAuth()`. This is the only required option.
+
+  ```typescript
+  import { betterAuth } from "better-auth";
+
+  export const auth = betterAuth({
+    basePath: "/api/auth",
+    // ... other Better Auth options
+  });
+  ```
+</ParamField>
+
+<ParamField path="bodyParser" type="AuthModuleBodyParserOptions">
+  Configure the body parsers that the module re-adds after you disable NestJS's built-in body parser. Both `json` and `urlencoded` parsers are enabled by default.
+
+  <Expandable title="properties">
+    <ParamField path="bodyParser.json" type="AuthModuleJsonBodyParserOptions">
+      JSON body parser configuration.
+
+      ```typescript
+      bodyParser: {
+        json: {
+          enabled: true,
+          limit: "2mb",
+          strict: true,
+          type: "application/json",
+          reviver: (key, value) => value,
+        }
+      }
+      ```
+
+      **Properties:**
+      - `enabled` (boolean): Enable/disable JSON parsing. Default: `true`
+      - `limit` (string | number): Maximum request body size. Default: `"100kb"`
+      - `strict` (boolean): Only parse objects and arrays. Default: `true`
+      - `type` (string | string[]): Content-Type to parse. Default: `"application/json"`
+      - `reviver` (function): JSON.parse reviver function
+    </ParamField>
+
+    <ParamField path="bodyParser.urlencoded" type="AuthModuleUrlencodedBodyParserOptions">
+      URL-encoded body parser configuration.
+
+      ```typescript
+      bodyParser: {
+        urlencoded: {
+          enabled: true,
+          extended: true,
+          limit: "2mb",
+          parameterLimit: 1000,
+        }
+      }
+      ```
+
+      **Properties:**
+      - `enabled` (boolean): Enable/disable URL-encoded parsing. Default: `true`
+      - `extended` (boolean): Use qs library for parsing (allows nested objects). Default: `true`
+      - `limit` (string | number): Maximum request body size. Default: `"100kb"`
+      - `parameterLimit` (number): Maximum number of parameters. Default: `1000`
+      - `type` (string | string[]): Content-Type to parse. Default: `"application/x-www-form-urlencoded"`
+
+      <Note>
+        On Fastify, `extended: true` requires the optional peer dependency `qs`. Install it with:
+        ```bash
+        npm install qs
+        ```
+      </Note>
+    </ParamField>
+
+    <ParamField path="bodyParser.rawBody" type="boolean" default="false">
+      When set to `true`, attaches the raw request buffer to `req.rawBody`.
+
+      This is useful for webhook signature verification that requires the raw, unparsed request body.
+
+      ```typescript
+      bodyParser: {
+        rawBody: true,
+      }
+      ```
+
+      <Warning>
+        Since this library requires disabling NestJS's built-in body parser, NestJS's `rawBody: true` option in `NestFactory.create()` has no effect. Use this option instead.
+      </Warning>
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+<ParamField path="disableGlobalAuthGuard" type="boolean" default="false">
+  When set to `true`, does not register `AuthGuard` as a global guard.
+
+  Use this if you prefer to apply `AuthGuard` manually or register it yourself via `APP_GUARD`.
+
+  ```typescript
+  AuthModule.forRoot({
+    auth,
+    disableGlobalAuthGuard: true,
+  })
+  ```
+
+  Then apply the guard manually:
+
+  ```typescript
+  import { Controller, Get, UseGuards } from "@nestjs/common";
+  import { AuthGuard } from "@thallesp/nestjs-better-auth";
+
+  @Controller("users")
+  @UseGuards(AuthGuard)
+  export class UserController {
+    @Get("me")
+    async getProfile() {
+      return { message: "Protected route" };
+    }
+  }
+  ```
+</ParamField>
+
+<ParamField path="disableControllers" type="boolean" default="false">
+  When set to `true`, does not register any controllers.
+
+  Use this if you want to handle routes manually or are using a custom route setup.
+
+  ```typescript
+  AuthModule.forRoot({
+    auth,
+    disableControllers: true,
+  })
+  ```
+</ParamField>
+
+<ParamField path="disableTrustedOriginsCors" type="boolean" default="false">
+  When set to `true`, disables the automatic CORS configuration for the origins specified in `trustedOrigins`.
+
+  ```typescript
+  AuthModule.forRoot({
+    auth,
+    disableTrustedOriginsCors: true,
+  })
+  ```
+
+  <Note>
+    On Fastify, Better Auth routes are mounted through middleware, so app-level `@fastify/cors` does not fully cover them by itself. This module applies Better Auth route CORS from `trustedOrigins` automatically. Only set this to `true` if you want to fully manage Better Auth route CORS yourself.
+  </Note>
+</ParamField>
+
+<ParamField path="middleware" type="(req, res, next) => void">
+  Optional middleware function that wraps the Better Auth handler. Receives standard Express middleware parameters `(req, res, next)` where `next` is a function that invokes the Better Auth handler.
+
+  This is useful for integrating with request-scoped libraries like MikroORM's RequestContext.
+
+  ```typescript
+  import { RequestContext } from '@mikro-orm/core';
+
+  AuthModule.forRoot({
+    auth,
+    middleware: (req, res, next) => {
+      RequestContext.create(orm.em, next);
+    },
+  })
+  ```
+</ParamField>
+
+## Deprecated Options
+
+<ParamField path="disableBodyParser" type="boolean" default="false">
+  <Warning>
+    **Deprecated:** Use `bodyParser.json.enabled` and `bodyParser.urlencoded.enabled` instead.
+  </Warning>
+
+  When set to `true`, disables both parsers unless you explicitly re-enable one in `bodyParser`.
+
+  ```typescript
+  // Old way (deprecated)
+  AuthModule.forRoot({
+    auth,
+    disableBodyParser: true,
+  })
+
+  // New way
+  AuthModule.forRoot({
+    auth,
+    bodyParser: {
+      json: { enabled: false },
+      urlencoded: { enabled: false },
+    },
+  })
+  ```
+</ParamField>
+
+<ParamField path="enableRawBodyParser" type="boolean" default="false">
+  <Warning>
+    **Deprecated:** Use `bodyParser.rawBody` instead.
+  </Warning>
+
+  When set to `true`, enables raw body parsing and attaches the raw buffer to `req.rawBody`.
+
+  ```typescript
+  // Old way (deprecated)
+  AuthModule.forRoot({
+    auth,
+    enableRawBodyParser: true,
+  })
+
+  // New way
+  AuthModule.forRoot({
+    auth,
+    bodyParser: {
+      rawBody: true,
+    },
+  })
+  ```
+</ParamField>
+
+## Examples
+
+### Minimal Configuration
+
+```typescript
+AuthModule.forRoot({
+  auth,
+})
+```
+
+### Custom Body Parser Limits
+
+```typescript
+AuthModule.forRoot({
+  auth,
+  bodyParser: {
+    json: { limit: "5mb" },
+    urlencoded: { limit: "5mb", extended: true },
+  },
+})
+```
+
+### Disable JSON Parser
+
+```typescript
+AuthModule.forRoot({
+  auth,
+  bodyParser: {
+    json: { enabled: false },
+  },
+})
+```
+
+### Enable Raw Body for Webhooks
+
+```typescript
+AuthModule.forRoot({
+  auth,
+  bodyParser: {
+    json: { limit: "2mb" },
+    urlencoded: { limit: "2mb", extended: true },
+    rawBody: true,
+  },
+})
+```
+
+Then access the raw body in your controllers:
+
+```typescript
+@Controller("webhooks")
+export class WebhookController {
+  @Post("stripe")
+  async handleStripeWebhook(@Request() req: ExpressRequest) {
+    const signature = req.headers['stripe-signature'];
+    const rawBody = req.rawBody; // Buffer
+    // Verify signature with raw body
+  }
+}
+```
+
+### Manual Guard Application
+
+```typescript
+AuthModule.forRoot({
+  auth,
+  disableGlobalAuthGuard: true,
+})
+```
+
+### Custom Middleware Integration
+
+```typescript
+AuthModule.forRoot({
+  auth,
+  middleware: (req, res, next) => {
+    // Custom logic before Better Auth handler
+    console.log(`Auth request: ${req.method} ${req.url}`);
+    next();
+  },
+})
+```
+
+## TypeScript Types
+
+For full type safety, import the types:
+
+```typescript
+import type { AuthModuleOptions } from "@thallesp/nestjs-better-auth";
+
+const options: AuthModuleOptions = {
+  auth,
+  bodyParser: {
+    json: { limit: "2mb" },
+  },
+};
+
+AuthModule.forRoot(options);
+```

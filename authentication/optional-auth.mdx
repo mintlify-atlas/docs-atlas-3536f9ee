@@ -1,0 +1,526 @@
+---
+title: Optional Authentication
+description: Make authentication optional for routes with @OptionalAuth() to support both authenticated and unauthenticated users
+---
+
+## Overview
+
+The `@OptionalAuth()` decorator makes authentication optional for specific routes. Unlike `@AllowAnonymous()` which skips authentication entirely, `@OptionalAuth()` checks for authentication but allows the request to proceed even if no session exists.
+
+This is useful for routes that provide enhanced functionality for authenticated users while remaining accessible to everyone.
+
+```typescript
+import { Controller, Get } from "@nestjs/common";
+import { OptionalAuth, Session, UserSession } from "@thallesp/nestjs-better-auth";
+
+@Controller("content")
+export class ContentController {
+  @OptionalAuth()
+  @Get("feed")
+  async getFeed(@Session() session: UserSession | null) {
+    if (session) {
+      return { personalized: true, userId: session.user.id };
+    }
+    return { personalized: false };
+  }
+}
+```
+
+## Method-Level Usage
+
+Apply `@OptionalAuth()` to individual route handlers:
+
+```typescript title="articles.controller.ts"
+import { Controller, Get, Param } from "@nestjs/common";
+import { OptionalAuth, Session, UserSession } from "@thallesp/nestjs-better-auth";
+
+@Controller("articles")
+export class ArticlesController {
+  @OptionalAuth()
+  @Get()
+  async listArticles(@Session() session: UserSession | null) {
+    const articles = await this.articlesService.findAll();
+    
+    if (session) {
+      // Return personalized content for authenticated users
+      return {
+        articles,
+        recommendations: await this.getRecommendations(session.user.id),
+      };
+    }
+    
+    // Return basic content for anonymous users
+    return { articles };
+  }
+
+  @OptionalAuth()
+  @Get(":id")
+  async getArticle(
+    @Param("id") id: string,
+    @Session() session: UserSession | null,
+  ) {
+    const article = await this.articlesService.findOne(id);
+    
+    if (session) {
+      // Track read history for authenticated users
+      await this.trackRead(session.user.id, id);
+    }
+    
+    return article;
+  }
+}
+```
+
+## Class-Level Usage
+
+Apply `@OptionalAuth()` to an entire controller:
+
+```typescript title="content.controller.ts"
+import { Controller, Get } from "@nestjs/common";
+import { OptionalAuth, Session, UserSession } from "@thallesp/nestjs-better-auth";
+
+@OptionalAuth() // All routes have optional authentication
+@Controller("content")
+export class ContentController {
+  @Get("feed")
+  async getFeed(@Session() session: UserSession | null) {
+    return {
+      items: await this.getContent(session?.user.id),
+      isAuthenticated: !!session,
+    };
+  }
+
+  @Get("trending")
+  async getTrending(@Session() session: UserSession | null) {
+    return {
+      trending: await this.getTrendingContent(),
+      personalized: !!session,
+    };
+  }
+}
+```
+
+## Checking Session Presence
+
+Always check if the session exists before accessing its properties:
+
+### Using Type Guards
+
+```typescript
+@OptionalAuth()
+@Get("profile")
+async getProfile(@Session() session: UserSession | null) {
+  if (!session) {
+    return {
+      message: "Please log in to view your profile",
+      authenticated: false,
+    };
+  }
+  
+  // TypeScript knows session is not null here
+  return {
+    user: session.user,
+    authenticated: true,
+  };
+}
+```
+
+### Using Optional Chaining
+
+```typescript
+@OptionalAuth()
+@Get("settings")
+async getSettings(@Session() session: UserSession | null) {
+  return {
+    userId: session?.user.id ?? null,
+    email: session?.user.email ?? null,
+    preferences: session ? await this.getPreferences(session.user.id) : {},
+  };
+}
+```
+
+### Using Nullish Coalescing
+
+```typescript
+@OptionalAuth()
+@Get("dashboard")
+async getDashboard(@Session() session: UserSession | null) {
+  const userId = session?.user.id ?? "anonymous";
+  const theme = session?.user.theme ?? "light";
+  
+  return { userId, theme };
+}
+```
+
+## Real-World Examples
+
+### Personalized Content Feed
+
+```typescript title="feed.controller.ts"
+import { Controller, Get, Query } from "@nestjs/common";
+import { OptionalAuth, Session, UserSession } from "@thallesp/nestjs-better-auth";
+
+@Controller("feed")
+export class FeedController {
+  @OptionalAuth()
+  @Get()
+  async getFeed(
+    @Session() session: UserSession | null,
+    @Query("page") page: number = 1,
+  ) {
+    if (session) {
+      // Personalized feed based on user preferences
+      return {
+        items: await this.feedService.getPersonalized(session.user.id, page),
+        personalized: true,
+        userId: session.user.id,
+      };
+    }
+    
+    // Generic popular feed
+    return {
+      items: await this.feedService.getPopular(page),
+      personalized: false,
+    };
+  }
+}
+```
+
+### Product Catalog with Favorites
+
+```typescript title="products.controller.ts"
+import { Controller, Get, Param } from "@nestjs/common";
+import { OptionalAuth, Session, UserSession } from "@thallesp/nestjs-better-auth";
+
+@Controller("products")
+export class ProductsController {
+  @OptionalAuth()
+  @Get()
+  async listProducts(@Session() session: UserSession | null) {
+    const products = await this.productsService.findAll();
+    
+    if (session) {
+      // Include favorite status for authenticated users
+      const favorites = await this.favoritesService.getByUser(session.user.id);
+      return products.map(product => ({
+        ...product,
+        isFavorite: favorites.includes(product.id),
+      }));
+    }
+    
+    return products;
+  }
+
+  @OptionalAuth()
+  @Get(":id")
+  async getProduct(
+    @Param("id") id: string,
+    @Session() session: UserSession | null,
+  ) {
+    const product = await this.productsService.findOne(id);
+    
+    if (session) {
+      // Add purchase history for authenticated users
+      const hasPurchased = await this.checkPurchaseHistory(
+        session.user.id,
+        id,
+      );
+      return { ...product, hasPurchased };
+    }
+    
+    return product;
+  }
+}
+```
+
+### E-commerce Cart
+
+```typescript title="cart.controller.ts"
+import { Controller, Get, Post, Body } from "@nestjs/common";
+import { OptionalAuth, Session, UserSession } from "@thallesp/nestjs-better-auth";
+
+@Controller("cart")
+export class CartController {
+  @OptionalAuth()
+  @Get()
+  async getCart(@Session() session: UserSession | null) {
+    if (session) {
+      // Return persistent cart from database
+      return await this.cartService.getByUserId(session.user.id);
+    }
+    
+    // Guest users use local storage
+    return {
+      message: "Guest cart - stored locally",
+      items: [],
+    };
+  }
+
+  @OptionalAuth()
+  @Post("add")
+  async addToCart(
+    @Session() session: UserSession | null,
+    @Body() item: { productId: string; quantity: number },
+  ) {
+    if (session) {
+      // Save to database for authenticated users
+      return await this.cartService.addItem(session.user.id, item);
+    }
+    
+    // Guest users handle cart client-side
+    return {
+      message: "Item added to guest cart",
+      item,
+    };
+  }
+}
+```
+
+### Content Voting
+
+```typescript title="posts.controller.ts"
+import { Controller, Get, Post, Param } from "@nestjs/common";
+import { OptionalAuth, Session, UserSession } from "@thallesp/nestjs-better-auth";
+
+@Controller("posts")
+export class PostsController {
+  @OptionalAuth()
+  @Get(":id")
+  async getPost(
+    @Param("id") id: string,
+    @Session() session: UserSession | null,
+  ) {
+    const post = await this.postsService.findOne(id);
+    
+    if (session) {
+      // Include user's vote status
+      const vote = await this.votesService.getUserVote(
+        session.user.id,
+        id,
+      );
+      return { ...post, userVote: vote };
+    }
+    
+    return post;
+  }
+
+  @OptionalAuth()
+  @Post(":id/vote")
+  async vote(
+    @Param("id") id: string,
+    @Session() session: UserSession | null,
+  ) {
+    if (!session) {
+      return {
+        success: false,
+        message: "Please log in to vote",
+      };
+    }
+    
+    await this.votesService.vote(session.user.id, id);
+    return { success: true };
+  }
+}
+```
+
+## GraphQL Support
+
+The `@OptionalAuth()` decorator works with GraphQL resolvers:
+
+```typescript title="posts.resolver.ts"
+import { Query, Resolver, Args } from "@nestjs/graphql";
+import { OptionalAuth, Session, UserSession } from "@thallesp/nestjs-better-auth";
+
+@Resolver(() => Post)
+export class PostsResolver {
+  @OptionalAuth()
+  @Query(() => [Post])
+  async posts(@Session() session: UserSession | null) {
+    if (session) {
+      return this.postsService.getPersonalized(session.user.id);
+    }
+    return this.postsService.getPublic();
+  }
+
+  @OptionalAuth()
+  @Query(() => Post)
+  async post(
+    @Args("id") id: string,
+    @Session() session: UserSession | null,
+  ) {
+    const post = await this.postsService.findOne(id);
+    
+    if (session) {
+      // Add user-specific metadata
+      return {
+        ...post,
+        isBookmarked: await this.checkBookmark(session.user.id, id),
+      };
+    }
+    
+    return post;
+  }
+}
+```
+
+## WebSocket Support
+
+For WebSocket gateways, use `@OptionalAuth()` with `@UseGuards(AuthGuard)`:
+
+```typescript title="chat.gateway.ts"
+import { UseGuards } from "@nestjs/common";
+import { SubscribeMessage, WebSocketGateway } from "@nestjs/websockets";
+import { AuthGuard, OptionalAuth, Session, UserSession } from "@thallesp/nestjs-better-auth";
+
+@WebSocketGateway({ path: "/ws" })
+@UseGuards(AuthGuard)
+export class ChatGateway {
+  @OptionalAuth()
+  @SubscribeMessage("join")
+  handleJoin(@Session() session: UserSession | null) {
+    if (session) {
+      return {
+        message: `Welcome ${session.user.name}`,
+        authenticated: true,
+      };
+    }
+    return {
+      message: "Welcome guest",
+      authenticated: false,
+    };
+  }
+}
+```
+
+## Request Object Access
+
+Session data is also available through the request object:
+
+```typescript title="content.controller.ts"
+import { Controller, Get, Request } from "@nestjs/common";
+import { OptionalAuth } from "@thallesp/nestjs-better-auth";
+import type { UserSession } from "@thallesp/nestjs-better-auth";
+
+@Controller("content")
+export class ContentController {
+  @OptionalAuth()
+  @Get("page")
+  async getPage(
+    @Request() req: { session: UserSession | null; user: UserSession["user"] | null },
+  ) {
+    return {
+      isAuthenticated: !!req.session,
+      userId: req.user?.id ?? null,
+    };
+  }
+}
+```
+
+## Difference from @AllowAnonymous()
+
+| Feature | @OptionalAuth() | @AllowAnonymous() |
+|---------|----------------|-------------------|
+| Authentication check | Performed | Skipped entirely |
+| Session available | Yes (can be null) | Not guaranteed |
+| Type safety | `UserSession \| null` | `UserSession \| undefined` |
+| Guards executed | Yes | No (bypassed) |
+| Use case | Enhanced features for logged-in users | Truly public endpoints |
+
+### When to Use Each
+
+**Use `@OptionalAuth()` when:**
+- Content is enhanced for authenticated users
+- You want to track behavior differently based on auth status
+- Features are unlocked for logged-in users
+- Personalization improves the experience
+
+**Use `@AllowAnonymous()` when:**
+- The endpoint is completely public
+- Authentication provides no benefit
+- You need maximum performance (skips auth check)
+- Examples: health checks, webhooks, documentation
+
+<Tip>
+  `@OptionalAuth()` provides better type safety with `UserSession | null` compared to `@AllowAnonymous()` where session may be undefined.
+</Tip>
+
+## Best Practices
+
+### 1. Always Check Session Existence
+
+```typescript
+// ✅ Good
+@OptionalAuth()
+@Get("data")
+async getData(@Session() session: UserSession | null) {
+  if (session) {
+    return this.getPersonalizedData(session.user.id);
+  }
+  return this.getGenericData();
+}
+
+// ❌ Bad - may throw error
+@OptionalAuth()
+@Get("data")
+async getData(@Session() session: UserSession | null) {
+  // This will throw if session is null
+  return this.getPersonalizedData(session.user.id);
+}
+```
+
+### 2. Provide Clear Messaging
+
+```typescript
+@OptionalAuth()
+@Post("action")
+async performAction(@Session() session: UserSession | null) {
+  if (!session) {
+    return {
+      success: false,
+      message: "Please log in to perform this action",
+      loginRequired: true,
+    };
+  }
+  
+  // Perform action
+  return { success: true };
+}
+```
+
+### 3. Use for Progressive Enhancement
+
+```typescript
+@OptionalAuth()
+@Get("content")
+async getContent(@Session() session: UserSession | null) {
+  const baseContent = await this.getBaseContent();
+  
+  if (!session) {
+    return baseContent;
+  }
+  
+  // Enhance with user-specific data
+  return {
+    ...baseContent,
+    recommendations: await this.getRecommendations(session.user.id),
+    preferences: await this.getPreferences(session.user.id),
+  };
+}
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Anonymous Routes" icon="lock-open" href="/authentication/anonymous-routes">
+    Learn about @AllowAnonymous() for public routes
+  </Card>
+  <Card title="Route Protection" icon="shield" href="/authentication/route-protection">
+    Understand the global AuthGuard
+  </Card>
+  <Card title="Decorators" icon="at" href="/authentication/decorators">
+    View all authentication decorators
+  </Card>
+  <Card title="Authorization" icon="user-shield" href="/authorization/roles">
+    Add role-based access control
+  </Card>
+</CardGroup>

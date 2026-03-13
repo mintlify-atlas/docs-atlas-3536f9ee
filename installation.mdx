@@ -1,0 +1,161 @@
+---
+title: Installation
+description: Install NestJS Better Auth and configure peer dependencies for your project
+---
+
+## Install the Package
+
+Install `@thallesp/nestjs-better-auth` in your NestJS project using your preferred package manager:
+
+<CodeGroup>
+
+```bash npm
+npm install @thallesp/nestjs-better-auth
+```
+
+```bash yarn
+yarn add @thallesp/nestjs-better-auth
+```
+
+```bash pnpm
+pnpm add @thallesp/nestjs-better-auth
+```
+
+```bash bun
+bun add @thallesp/nestjs-better-auth
+```
+
+</CodeGroup>
+
+## Peer Dependencies
+
+The library requires the following peer dependencies to be installed in your project:
+
+### Required Dependencies
+
+These dependencies are required for the library to work:
+
+```json
+{
+  "@nestjs/common": "^11.1.6",
+  "@nestjs/core": "^11.1.6",
+  "better-auth": ">=1.5.0 <2.0.0",
+  "express": "^5.1.0",
+  "typescript": "^5.9.2"
+}
+```
+
+<Warning>
+  **Better Auth Version Requirement**: This library requires Better Auth >= 1.5.0. Older versions are deprecated and unsupported.
+</Warning>
+
+<Note>
+  **Express Version**: The library requires Express 5.1.0 or higher. If you're using an older version of NestJS that comes with Express 4.x, you'll need to upgrade.
+</Note>
+
+### Optional Dependencies
+
+These dependencies are only required if you're using specific features:
+
+#### GraphQL Support
+
+If you're using GraphQL with NestJS, install:
+
+```bash
+npm install @nestjs/graphql graphql
+```
+
+#### WebSocket Support
+
+If you're using WebSockets, install:
+
+```bash
+npm install @nestjs/websockets
+```
+
+#### Fastify with URL-Encoded Forms
+
+If you're using Fastify and need nested URL-encoded form parsing (with `extended: true`), install:
+
+```bash
+npm install qs
+```
+
+<Info>
+  The `qs` package is only needed when using Fastify adapter with `bodyParser.urlencoded.extended: true`. Express includes this functionality by default.
+</Info>
+
+## Prerequisites
+
+Before proceeding, ensure you have:
+
+### 1. A Working NestJS Application
+
+If you don't have a NestJS application yet, create one:
+
+```bash
+npm i -g @nestjs/cli
+nest new my-app
+```
+
+### 2. Better Auth Installed and Configured
+
+You need a configured Better Auth instance. Follow the [Better Auth installation guide](https://www.better-auth.com/docs/installation) to set up:
+
+- Database adapter (Prisma, Drizzle, Kysely, etc.)
+- Authentication methods (email/password, OAuth, magic links, etc.)
+- Any plugins you want to use (admin, organization, bearer tokens, etc.)
+
+Create a Better Auth instance in your project:
+
+```typescript auth.ts
+import { betterAuth } from "better-auth";
+import { prismaAdapter } from "better-auth/adapters/prisma";
+import { PrismaClient } from "@prisma/client";
+
+const prisma = new PrismaClient();
+
+export const auth = betterAuth({
+  database: prismaAdapter(prisma, {
+    provider: "postgresql",
+  }),
+  emailAndPassword: {
+    enabled: true,
+  },
+  // Add other Better Auth configuration here
+});
+```
+
+<Note>
+  The example above uses Prisma, but Better Auth supports multiple database adapters. Check the [Better Auth documentation](https://www.better-auth.com/docs/installation#database-setup) for your preferred adapter.
+</Note>
+
+## Verify Installation
+
+Verify that all dependencies are installed correctly:
+
+```bash
+npm list @thallesp/nestjs-better-auth better-auth
+```
+
+You should see both packages listed without any warnings.
+
+## Node.js Version
+
+The library requires Node.js version **22.22.1 or higher**. Check your Node.js version:
+
+```bash
+node --version
+```
+
+<Warning>
+  If you're using an older Node.js version, upgrade to at least v22.22.1 before proceeding.
+</Warning>
+
+## What's Next?
+
+Now that you have everything installed, let's get your first authenticated endpoint running:
+
+<Card title="Quick Start" icon="rocket" href="/quickstart">
+  Set up AuthModule and create your first protected route
+</Card>

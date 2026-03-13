@@ -1,0 +1,328 @@
+---
+title: '@Session'
+description: Parameter decorator that extracts the user session from the request
+---
+
+## Overview
+
+`@Session()` is a parameter decorator that provides easy access to the authenticated user's session data in controller methods. It works with HTTP, GraphQL, and WebSocket execution contexts.
+
+## Type Signature
+
+```typescript
+export const Session: ReturnType<typeof createParamDecorator> =
+  createParamDecorator(
+    async (_data: unknown, context: ExecutionContext): Promise<unknown> => {
+      const request = await getRequestFromContext(context);
+      return request.session;
+    },
+  );
+```
+
+## Usage
+
+### Basic Usage
+
+```typescript
+import { Controller, Get } from '@nestjs/common';
+import { Session } from '@better-auth/nestjs';
+import type { UserSession } from '@better-auth/nestjs';
+
+@Controller('api')
+export class UserController {
+  @Get('me')
+  getCurrentUser(@Session() session: UserSession) {
+    return {
+      id: session.user.id,
+      email: session.user.email,
+      name: session.user.name,
+    };
+  }
+}
+```
+
+### With Optional Authentication
+
+```typescript
+import { OptionalAuth } from '@better-auth/nestjs';
+
+@Controller('posts')
+export class PostsController {
+  @OptionalAuth()
+  @Get(':id')
+  getPost(
+    @Param('id') id: string,
+    @Session() session: UserSession | null,
+  ) {
+    if (session) {
+      // Return user-specific view
+      return this.postsService.getPostForUser(id, session.user.id);
+    }
+    // Return public view
+    return this.postsService.getPublicPost(id);
+  }
+}
+```
+
+### Accessing User Information
+
+```typescript
+@Get('profile')
+getProfile(@Session() session: UserSession) {
+  const { user, session: sessionData } = session;
+  
+  return {
+    // User information
+    userId: user.id,
+    email: user.email,
+    name: user.name,
+    emailVerified: user.emailVerified,
+    image: user.image,
+    createdAt: user.createdAt,
+    updatedAt: user.updatedAt,
+    
+    // User role (if admin plugin enabled)
+    role: user.role,
+    
+    // Session information
+    sessionId: sessionData.id,
+    expiresAt: sessionData.expiresAt,
+    activeOrganizationId: sessionData.activeOrganizationId,
+  };
+}
+```
+
+### In Services
+
+Pass the session from controller to service:
+
+```typescript
+// Controller
+@Controller('orders')
+export class OrdersController {
+  constructor(private ordersService: OrdersService) {}
+
+  @Post()
+  createOrder(
+    @Body() dto: CreateOrderDto,
+    @Session() session: UserSession,
+  ) {
+    return this.ordersService.create(dto, session.user.id);
+  }
+}
+
+// Service
+@Injectable()
+export class OrdersService {
+  create(dto: CreateOrderDto, userId: string) {
+    // Use userId from session
+    return this.db.order.create({
+      data: {
+        ...dto,
+        userId,
+      },
+    });
+  }
+}
+```
+
+## Session Data Structure
+
+The `@Session()` decorator returns a `UserSession` object:
+
+<ResponseField name="user" type="object" required>
+  User information from the authenticated session
+  
+  <Expandable title="properties">
+    <ResponseField name="id" type="string" required>
+      Unique user identifier
+    </ResponseField>
+    
+    <ResponseField name="email" type="string" required>
+      User's email address
+    </ResponseField>
+    
+    <ResponseField name="name" type="string" required>
+      User's display name
+    </ResponseField>
+    
+    <ResponseField name="emailVerified" type="boolean" required>
+      Whether the email has been verified
+    </ResponseField>
+    
+    <ResponseField name="image" type="string | null">
+      User's profile image URL
+    </ResponseField>
+    
+    <ResponseField name="createdAt" type="Date" required>
+      Account creation timestamp
+    </ResponseField>
+    
+    <ResponseField name="updatedAt" type="Date" required>
+      Last update timestamp
+    </ResponseField>
+    
+    <ResponseField name="role" type="string | string[] | undefined">
+      User's role (requires admin plugin)
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="session" type="object" required>
+  Session metadata
+  
+  <Expandable title="properties">
+    <ResponseField name="id" type="string" required>
+      Unique session identifier
+    </ResponseField>
+    
+    <ResponseField name="userId" type="string" required>
+      ID of the user this session belongs to
+    </ResponseField>
+    
+    <ResponseField name="expiresAt" type="Date" required>
+      When the session expires
+    </ResponseField>
+    
+    <ResponseField name="token" type="string" required>
+      Session token
+    </ResponseField>
+    
+    <ResponseField name="activeOrganizationId" type="string | undefined">
+      Currently active organization (requires organization plugin)
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+## Context Support
+
+The decorator works across different execution contexts:
+
+### HTTP (Express/Fastify)
+
+```typescript
+@Controller('api')
+export class ApiController {
+  @Get('profile')
+  getProfile(@Session() session: UserSession) {
+    return session.user;
+  }
+}
+```
+
+### GraphQL
+
+```typescript
+import { Query, Resolver } from '@nestjs/graphql';
+
+@Resolver()
+export class UserResolver {
+  @Query(() => User)
+  me(@Session() session: UserSession) {
+    return session.user;
+  }
+}
+```
+
+### WebSocket
+
+```typescript
+import { SubscribeMessage, WebSocketGateway } from '@nestjs/websockets';
+
+@WebSocketGateway()
+export class EventsGateway {
+  @SubscribeMessage('events')
+  handleEvents(@Session() session: UserSession) {
+    return { userId: session.user.id };
+  }
+}
+```
+
+## Type Safety
+
+Import the `UserSession` type for full type safety:
+
+```typescript
+import type { UserSession } from '@better-auth/nestjs';
+
+@Get('info')
+getUserInfo(@Session() session: UserSession) {
+  // TypeScript knows all available properties
+  const userId: string = session.user.id;
+  const email: string = session.user.email;
+  const role: string | string[] | undefined = session.user.role;
+}
+```
+
+## Common Patterns
+
+### Extracting User ID
+
+```typescript
+@Post('posts')
+createPost(
+  @Body() dto: CreatePostDto,
+  @Session() session: UserSession,
+) {
+  return this.postsService.create({
+    ...dto,
+    authorId: session.user.id,
+  });
+}
+```
+
+### Authorization in Controllers
+
+```typescript
+@Delete('posts/:id')
+async deletePost(
+  @Param('id') id: string,
+  @Session() session: UserSession,
+) {
+  const post = await this.postsService.findOne(id);
+  
+  // Check if user owns the post
+  if (post.authorId !== session.user.id) {
+    throw new ForbiddenException('You can only delete your own posts');
+  }
+  
+  return this.postsService.delete(id);
+}
+```
+
+### Organization Context
+
+```typescript
+@Get('organization/settings')
+getOrgSettings(@Session() session: UserSession) {
+  const orgId = session.session.activeOrganizationId;
+  
+  if (!orgId) {
+    throw new BadRequestException('No active organization');
+  }
+  
+  return this.organizationService.getSettings(orgId);
+}
+```
+
+## Notes
+
+- Session is `null` when using `@OptionalAuth()` without authentication
+- Session is `null` when using `@AllowAnonymous()` without authentication
+- Session is always present (non-null) on protected routes
+- The decorator is automatically attached by `AuthGuard`
+- Works with all Better Auth plugins and configurations
+
+## Related
+
+<CardGroup cols={3}>
+  <Card title="UserSession" href="/api/types/user-session" icon="circle-info">
+    Session type definition
+  </Card>
+  <Card title="AuthGuard" href="/api/auth-guard" icon="shield">
+    Authentication guard
+  </Card>
+  <Card title="@OptionalAuth" href="/api/decorators/optional-auth" icon="lock-open">
+    Optional authentication
+  </Card>
+</CardGroup>

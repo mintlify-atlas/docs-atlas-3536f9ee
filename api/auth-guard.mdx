@@ -1,0 +1,327 @@
+---
+title: AuthGuard
+description: NestJS guard that handles authentication and authorization for protected routes
+---
+
+## Overview
+
+`AuthGuard` is a NestJS guard that validates authentication and authorization for incoming requests. It works with HTTP, GraphQL, and WebSocket contexts, and can be configured using decorators.
+
+## Type Signature
+
+```typescript
+@Injectable()
+class AuthGuard implements CanActivate {
+  constructor(
+    @Inject(Reflector) private readonly reflector: Reflector,
+    @Inject(MODULE_OPTIONS_TOKEN) private readonly options: AuthModuleOptions,
+  ) {}
+
+  async canActivate(context: ExecutionContext): Promise<boolean>;
+}
+```
+
+## Behavior
+
+The guard automatically:
+
+1. **Retrieves the session** from Better Auth using request headers
+2. **Attaches session to request** - Available via `@Session()` decorator
+3. **Checks route metadata** - Respects `@AllowAnonymous()`, `@OptionalAuth()`, etc.
+4. **Validates authentication** - Throws `UnauthorizedException` if not authenticated
+5. **Checks authorization** - Validates roles and permissions if specified
+
+## Global Registration
+
+By default, `AuthGuard` is registered globally when you import `AuthModule`:
+
+```typescript
+AuthModule.forRoot({
+  auth,
+  // Global guard is enabled by default
+})
+```
+
+All routes require authentication unless explicitly marked otherwise.
+
+### Disable Global Guard
+
+If you prefer manual guard application:
+
+```typescript
+AuthModule.forRoot({ auth }, {
+  disableGlobalAuthGuard: true,
+})
+```
+
+Then apply manually to specific routes:
+
+```typescript
+import { UseGuards } from '@nestjs/common';
+import { AuthGuard } from '@better-auth/nestjs';
+
+@Controller('protected')
+@UseGuards(AuthGuard)
+export class ProtectedController {
+  // Routes here require authentication
+}
+```
+
+## Request Augmentation
+
+The guard adds properties to the request object:
+
+```typescript
+interface Request {
+  session: UserSession | null; // Full session object
+  user: UserSession['user'] | null; // User object (for observability tools)
+}
+```
+
+## Context Support
+
+The guard supports multiple execution contexts:
+
+- **HTTP** - Express/Fastify requests
+- **GraphQL** - GraphQL resolvers
+- **WebSocket** - Socket.io connections
+- **RPC** - Microservice requests
+
+Errors are thrown appropriately for each context:
+
+| Context | Unauthorized | Forbidden |
+|---------|-------------|----------|
+| HTTP | `UnauthorizedException` | `ForbiddenException` |
+| GraphQL | `UnauthorizedException` | `ForbiddenException` |
+| WebSocket | `WsException('UNAUTHORIZED')` | `WsException('FORBIDDEN')` |
+| RPC | `Error('UNAUTHORIZED')` | `Error('FORBIDDEN')` |
+
+## Authorization Checks
+
+The guard performs authorization checks in this order:
+
+1. **Public/Optional** - Check `@AllowAnonymous()` and `@OptionalAuth()`
+2. **User Roles** - Check `@Roles()` decorator
+3. **Organization Roles** - Check `@OrgRoles()` decorator
+4. **User Permissions** - Check `@UserHasPermission()` decorator
+5. **Member Permissions** - Check `@MemberHasPermission()` decorator
+
+### User Roles (`@Roles`)
+
+Checks `user.role` field from Better Auth's admin plugin:
+
+```typescript
+@Roles(['admin', 'superadmin'])
+@Get('admin-only')
+adminRoute() {
+  return 'Only admins can access this';
+}
+```
+
+Supports:
+- Single role: `user.role = 'admin'`
+- Multiple roles (array): `user.role = ['admin', 'moderator']`
+- Comma-separated: `user.role = 'admin,moderator'`
+
+### Organization Roles (`@OrgRoles`)
+
+Checks organization member role from Better Auth's organization plugin:
+
+```typescript
+@OrgRoles(['owner', 'admin'])
+@Post('settings')
+updateOrgSettings() {
+  return 'Only org owners/admins can modify settings';
+}
+```
+
+Requires:
+- Active organization in session (`activeOrganizationId`)
+- Better Auth organization plugin configured
+
+### User Permissions (`@UserHasPermission`)
+
+Checks user-level permissions using Better Auth's access control:
+
+```typescript
+@UserHasPermission({ permission: { project: ['create', 'update'] } })
+@Post('project')
+createProject() {
+  return 'User can create/update projects';
+}
+```
+
+Supports:
+- `permission` - Single permission check
+- `permissions` - Multiple permission checks
+- `role` - Server-only role override
+- `userId` - Check permissions for specific user
+
+### Member Permissions (`@MemberHasPermission`)
+
+Checks organization member permissions:
+
+```typescript
+@MemberHasPermission({ permissions: { invoice: ['create', 'approve'] } })
+@Post('invoice')
+createInvoice() {
+  return 'Member can create/approve invoices in this org';
+}
+```
+
+Requires:
+- Active organization in session
+- Better Auth organization plugin with access control
+
+## Error Handling
+
+The guard throws appropriate errors based on context:
+
+### Unauthorized (401)
+
+Thrown when:
+- No session exists and route is not public/optional
+- Session token is invalid or expired
+
+```typescript
+// HTTP
+throw new UnauthorizedException({
+  code: 'UNAUTHORIZED',
+  message: 'Unauthorized',
+});
+
+// GraphQL
+throw new UnauthorizedException();
+
+// WebSocket
+throw new WsException('UNAUTHORIZED');
+```
+
+### Forbidden (403)
+
+Thrown when:
+- User doesn't have required roles
+- User doesn't have required permissions
+- Organization role/permission check fails
+
+```typescript
+// HTTP
+throw new ForbiddenException({
+  code: 'FORBIDDEN',
+  message: 'Insufficient permissions',
+});
+
+// GraphQL
+throw new ForbiddenException('Insufficient permissions');
+
+// WebSocket
+throw new WsException('FORBIDDEN');
+```
+
+## Examples
+
+### Basic Protected Route
+
+```typescript
+@Controller('api')
+export class ApiController {
+  @Get('profile')
+  getProfile(@Session() session: UserSession) {
+    return session.user;
+  }
+}
+```
+
+### Mixed Access Levels
+
+```typescript
+@Controller('posts')
+export class PostsController {
+  @AllowAnonymous()
+  @Get()
+  listPosts() {
+    return 'Anyone can view posts';
+  }
+
+  @OptionalAuth()
+  @Get(':id')
+  getPost(@Session() session: UserSession | null) {
+    // Show extra details if authenticated
+    if (session) {
+      return 'Full post with user-specific data';
+    }
+    return 'Public post view';
+  }
+
+  @Post()
+  createPost(@Session() session: UserSession) {
+    return 'Authenticated users can create posts';
+  }
+}
+```
+
+### Role-Based Access
+
+```typescript
+@Controller('admin')
+@Roles(['admin'])
+export class AdminController {
+  @Get('users')
+  listUsers() {
+    return 'Admin can view all users';
+  }
+
+  @Delete('user/:id')
+  @Roles(['superadmin']) // More restrictive
+  deleteUser(@Param('id') id: string) {
+    return 'Only superadmins can delete users';
+  }
+}
+```
+
+### Permission-Based Access
+
+```typescript
+@Controller('projects')
+export class ProjectsController {
+  @UserHasPermission({ permission: { project: ['create'] } })
+  @Post()
+  createProject() {
+    return 'User has project.create permission';
+  }
+
+  @UserHasPermission({ 
+    permissions: { 
+      project: ['update'], 
+      team: ['manage'] 
+    } 
+  })
+  @Put(':id')
+  updateProject() {
+    return 'User has both project.update and team.manage permissions';
+  }
+}
+```
+
+## Related
+
+<CardGroup cols={3}>
+  <Card title="@AllowAnonymous" href="/api/decorators/allow-anonymous" icon="lock-open">
+    Allow public access
+  </Card>
+  <Card title="@OptionalAuth" href="/api/decorators/optional-auth" icon="lock-open">
+    Optional authentication
+  </Card>
+  <Card title="@Session" href="/api/decorators/session" icon="user">
+    Extract session data
+  </Card>
+  <Card title="@Roles" href="/api/decorators/roles" icon="user-shield">
+    User role authorization
+  </Card>
+  <Card title="@OrgRoles" href="/api/decorators/org-roles" icon="users">
+    Organization role authorization
+  </Card>
+  <Card title="UserSession" href="/api/types/user-session" icon="circle-info">
+    Session type definition
+  </Card>
+</CardGroup>

@@ -1,0 +1,286 @@
+---
+title: "Hooks"
+description: "Create custom hooks that integrate with NestJS's dependency injection system"
+---
+
+## Overview
+
+Hooks allow you to execute custom logic before or after Better Auth routes are processed. They integrate seamlessly with NestJS's dependency injection system, allowing you to inject services and use your application's existing infrastructure.
+
+<Warning>
+  To use hooks, you **must** set `hooks: {}` (empty object) in your `betterAuth(...)` config. You can still add your own Better Auth hooks; `hooks: {}` is just the minimum required.
+</Warning>
+
+## Basic Setup
+
+### 1. Enable Hooks in Better Auth
+
+Add `hooks: {}` to your Better Auth configuration:
+
+```ts title="auth.ts"
+import { betterAuth } from "better-auth";
+
+export const auth = betterAuth({
+  basePath: "/api/auth",
+  emailAndPassword: { enabled: true },
+  // Minimum required to use hooks - you can add your own hooks here too
+  hooks: {},
+});
+```
+
+### 2. Create a Hook Class
+
+Create a hook class with the `@Hook()` decorator:
+
+```ts title="hooks/sign-up.hook.ts"
+import { Injectable } from "@nestjs/common";
+import {
+  BeforeHook,
+  Hook,
+  AuthHookContext,
+} from "@thallesp/nestjs-better-auth";
+import { SignUpService } from "./sign-up.service";
+
+@Hook()
+@Injectable()
+export class SignUpHook {
+  constructor(private readonly signUpService: SignUpService) {}
+
+  @BeforeHook("/sign-up/email")
+  async handle(ctx: AuthHookContext) {
+    // Custom logic like enforcing email domain registration
+    // Can throw APIError if validation fails
+    await this.signUpService.execute(ctx);
+  }
+}
+```
+
+### 3. Register the Hook
+
+Register your hook as a provider in your module:
+
+```ts title="app.module.ts"
+import { Module } from "@nestjs/common";
+import { AuthModule } from "@thallesp/nestjs-better-auth";
+import { SignUpHook } from "./hooks/sign-up.hook";
+import { SignUpService } from "./sign-up.service";
+import { auth } from "./auth";
+
+@Module({
+  imports: [AuthModule.forRoot({ auth })],
+  providers: [SignUpHook, SignUpService],
+})
+export class AppModule {}
+```
+
+## Hook Decorators
+
+### @Hook()
+
+Class decorator that marks a provider as containing hook methods. Must be applied to classes that use `@BeforeHook()` or `@AfterHook()` decorators.
+
+```ts
+@Hook()
+@Injectable()
+export class MyHook {
+  // Hook methods here
+}
+```
+
+### @BeforeHook()
+
+Method decorator that registers a method to be executed **before** a specific auth route is processed.
+
+```ts
+@BeforeHook("/sign-up/email")
+async handle(ctx: AuthHookContext) {
+  // Executed before /sign-up/email
+}
+```
+
+### @AfterHook()
+
+Method decorator that registers a method to be executed **after** a specific auth route is processed.
+
+```ts
+@AfterHook("/sign-up/email")
+async handle(ctx: AuthHookContext) {
+  // Executed after /sign-up/email
+}
+```
+
+## Hook Context
+
+The `AuthHookContext` provides access to the request context:
+
+```ts
+export type AuthHookContext = {
+  path: string;          // The auth route path
+  request: Request;      // Web API Request object
+  context: {
+    body: unknown;       // Parsed request body
+    headers: Headers;    // Request headers
+    method: string;      // HTTP method
+  };
+};
+```
+
+## Dependency Injection
+
+Hooks fully support NestJS dependency injection:
+
+```ts
+@Hook()
+@Injectable()
+export class EmailValidationHook {
+  constructor(
+    private readonly emailService: EmailService,
+    private readonly configService: ConfigService,
+  ) {}
+
+  @BeforeHook("/sign-up/email")
+  async validateEmail(ctx: AuthHookContext) {
+    const { email } = ctx.context.body as { email: string };
+    const allowedDomains = this.configService.get('ALLOWED_DOMAINS');
+    
+    if (!this.emailService.isAllowedDomain(email, allowedDomains)) {
+      throw new Error('Email domain not allowed');
+    }
+  }
+}
+```
+
+## Multiple Hooks
+
+You can create multiple hooks for the same route:
+
+```ts
+// First hook - validation
+@Hook()
+@Injectable()
+export class ValidationHook {
+  @BeforeHook("/sign-up/email")
+  async validate(ctx: AuthHookContext) {
+    // Validation logic
+  }
+}
+
+// Second hook - logging
+@Hook()
+@Injectable()
+export class LoggingHook {
+  @AfterHook("/sign-up/email")
+  async log(ctx: AuthHookContext) {
+    // Logging logic
+  }
+}
+```
+
+Register both in your module:
+
+```ts
+@Module({
+  imports: [AuthModule.forRoot({ auth })],
+  providers: [ValidationHook, LoggingHook],
+})
+export class AppModule {}
+```
+
+## Error Handling
+
+Throw errors in hooks to prevent the auth route from executing:
+
+```ts
+@Hook()
+@Injectable()
+export class SecurityHook {
+  @BeforeHook("/sign-up/email")
+  async checkSecurity(ctx: AuthHookContext) {
+    const { email } = ctx.context.body as { email: string };
+    
+    if (this.isBlacklisted(email)) {
+      // This will prevent the sign-up from completing
+      throw new Error('Email is blacklisted');
+    }
+  }
+}
+```
+
+## Common Use Cases
+
+### Email Domain Restriction
+
+```ts
+@Hook()
+@Injectable()
+export class EmailDomainHook {
+  @BeforeHook("/sign-up/email")
+  async validateDomain(ctx: AuthHookContext) {
+    const { email } = ctx.context.body as { email: string };
+    const domain = email.split('@')[1];
+    
+    const allowedDomains = ['company.com', 'partner.com'];
+    if (!allowedDomains.includes(domain)) {
+      throw new Error('Only company emails are allowed');
+    }
+  }
+}
+```
+
+### Audit Logging
+
+```ts
+@Hook()
+@Injectable()
+export class AuditHook {
+  constructor(private readonly auditService: AuditService) {}
+
+  @AfterHook("/sign-up/email")
+  async logSignUp(ctx: AuthHookContext) {
+    const { email, name } = ctx.context.body as { email: string; name: string };
+    
+    await this.auditService.log({
+      action: 'USER_SIGNUP',
+      email,
+      name,
+      timestamp: new Date(),
+    });
+  }
+}
+```
+
+### Custom Validation
+
+```ts
+@Hook()
+@Injectable()
+export class PasswordPolicyHook {
+  @BeforeHook("/sign-up/email")
+  async validatePassword(ctx: AuthHookContext) {
+    const { password } = ctx.context.body as { password: string };
+    
+    // Custom password requirements
+    if (password.length < 12) {
+      throw new Error('Password must be at least 12 characters');
+    }
+    
+    if (!/[A-Z]/.test(password)) {
+      throw new Error('Password must contain uppercase letters');
+    }
+    
+    if (!/[0-9]/.test(password)) {
+      throw new Error('Password must contain numbers');
+    }
+  }
+}
+```
+
+## Validation
+
+<Warning>
+  If you have `@Hook()` providers in your module but haven't configured `hooks: {}` in Better Auth, the module will throw an error at initialization:
+  
+  `Detected @Hook providers but Better Auth 'hooks' are not configured. Add 'hooks: {}' to your betterAuth(...) options.`
+</Warning>
+
+This validation ensures that hooks are properly configured before your application starts.

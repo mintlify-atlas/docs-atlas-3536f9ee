@@ -1,0 +1,320 @@
+---
+title: "Body Parser Configuration"
+description: "Configure body parsing for Better Auth and your NestJS application"
+---
+
+## Why Disable NestJS Body Parser?
+
+Better Auth needs access to the raw request body to properly handle authentication requests. NestJS's built-in body parser consumes the request stream before Better Auth can process it, which causes authentication to fail.
+
+<Warning>
+  You **must** disable NestJS's built-in body parser by setting `bodyParser: false` in `NestFactory.create()`.
+</Warning>
+
+## Basic Setup
+
+### 1. Disable Built-in Body Parser
+
+```ts title="main.ts"
+import { NestFactory } from "@nestjs/core";
+import { AppModule } from "./app.module";
+
+async function bootstrap() {
+  const app = await NestFactory.create(AppModule, {
+    // The library will re-add the default body parsers for non-auth routes
+    bodyParser: false,
+  });
+  await app.listen(process.env.PORT ?? 3333);
+}
+bootstrap();
+```
+
+### 2. Configure Body Parser in AuthModule
+
+The library automatically re-adds body parsers for non-auth routes:
+
+```ts title="app.module.ts"
+import { Module } from "@nestjs/common";
+import { AuthModule } from "@thallesp/nestjs-better-auth";
+import { auth } from "./auth";
+
+@Module({
+  imports: [
+    AuthModule.forRoot({
+      auth,
+      bodyParser: {
+        json: { limit: "2mb" },
+        urlencoded: { limit: "2mb", extended: true },
+        rawBody: true,
+      },
+    }),
+  ],
+})
+export class AppModule {}
+```
+
+## Body Parser Options
+
+### JSON Parser
+
+Configure the JSON body parser:
+
+```ts
+AuthModule.forRoot({
+  auth,
+  bodyParser: {
+    json: {
+      enabled: true,        // Enable/disable JSON parser
+      limit: "2mb",         // Maximum request body size
+      strict: true,         // Only accept arrays and objects
+      type: "application/json", // Content-Type to parse
+    },
+  },
+})
+```
+
+**Available Options:**
+
+- `enabled` - Enable or disable the JSON parser (default: `true`)
+- `limit` - Maximum request body size (default: `"100kb"`)
+- `strict` - Only accept arrays and objects (default: `true`)
+- `type` - Content-Type to parse (default: `"application/json"`)
+- `reviver` - JSON.parse reviver function
+- `inflate` - Handle deflated (compressed) bodies (default: `true`)
+
+### URL-Encoded Parser
+
+Configure the URL-encoded body parser:
+
+```ts
+AuthModule.forRoot({
+  auth,
+  bodyParser: {
+    urlencoded: {
+      enabled: true,           // Enable/disable URL-encoded parser
+      extended: true,          // Use qs library for parsing
+      limit: "2mb",            // Maximum request body size
+      parameterLimit: 1000,    // Maximum number of parameters
+    },
+  },
+})
+```
+
+**Available Options:**
+
+- `enabled` - Enable or disable the URL-encoded parser (default: `true`)
+- `extended` - Use `qs` library for nested parsing (default: `true`)
+- `limit` - Maximum request body size (default: `"100kb"`)
+- `parameterLimit` - Maximum number of parameters (default: `1000`)
+- `type` - Content-Type to parse (default: `"application/x-www-form-urlencoded"`)
+- `inflate` - Handle deflated bodies (default: `true`)
+
+<Note>
+  On Fastify, `extended: true` requires the optional peer dependency `qs`. Install it with:
+  
+  ```bash
+  npm install qs
+  ```
+</Note>
+
+### Raw Body Support
+
+Enable raw body support for webhook signature verification:
+
+```ts
+AuthModule.forRoot({
+  auth,
+  bodyParser: {
+    rawBody: true,  // Enables req.rawBody
+  },
+})
+```
+
+Access the raw body in your controllers:
+
+```ts
+import { Controller, Post, Request } from "@nestjs/common";
+import type { Request as ExpressRequest } from "express";
+
+@Controller("webhooks")
+export class WebhookController {
+  @Post("stripe")
+  async handleStripeWebhook(@Request() req: ExpressRequest & { rawBody?: Buffer }) {
+    // Verify webhook signature using raw body
+    const signature = req.headers['stripe-signature'];
+    const event = stripe.webhooks.constructEvent(
+      req.rawBody,  // Raw body buffer
+      signature,
+      process.env.STRIPE_WEBHOOK_SECRET
+    );
+    
+    return { received: true };
+  }
+}
+```
+
+<Warning>
+  Since we disable NestJS's built-in body parser, the `rawBody: true` option in `NestFactory.create()` has no effect. Use `bodyParser.rawBody` in `AuthModule.forRoot()` instead.
+</Warning>
+
+## Disabling Parsers
+
+You can disable individual parsers:
+
+```ts
+AuthModule.forRoot({
+  auth,
+  bodyParser: {
+    json: { enabled: false },      // Disable JSON parser
+    urlencoded: { enabled: false }, // Disable URL-encoded parser
+  },
+})
+```
+
+## Adapter-Specific Configuration
+
+### Express
+
+For Express, the library uses the standard `body-parser` package:
+
+```ts
+AuthModule.forRoot({
+  auth,
+  bodyParser: {
+    json: {
+      limit: "10mb",
+      strict: true,
+    },
+    urlencoded: {
+      extended: true,
+      limit: "10mb",
+    },
+    rawBody: true,
+  },
+})
+```
+
+### Fastify
+
+For Fastify, the library uses Fastify's built-in content type parsers:
+
+```ts
+AuthModule.forRoot({
+  auth,
+  bodyParser: {
+    json: {
+      limit: 10485760, // 10MB in bytes (Fastify uses numbers)
+    },
+    urlencoded: {
+      extended: true,  // Requires 'qs' package
+      limit: 10485760,
+    },
+  },
+})
+```
+
+<Note>
+  Fastify accepts the `limit` option as either a number (bytes) or a string (e.g., `"10mb"`).
+</Note>
+
+## Common Configurations
+
+### Default Configuration
+
+```ts
+AuthModule.forRoot({
+  auth,
+  bodyParser: {
+    json: { enabled: true },
+    urlencoded: { enabled: true, extended: true },
+    rawBody: false,
+  },
+})
+```
+
+### Large File Uploads
+
+```ts
+AuthModule.forRoot({
+  auth,
+  bodyParser: {
+    json: { limit: "50mb" },
+    urlencoded: { limit: "50mb", extended: true },
+  },
+})
+```
+
+### Webhook-Only (No JSON/URL-encoded)
+
+```ts
+AuthModule.forRoot({
+  auth,
+  bodyParser: {
+    json: { enabled: false },
+    urlencoded: { enabled: false },
+    rawBody: true,  // Only raw body for webhooks
+  },
+})
+```
+
+### Strict JSON Only
+
+```ts
+AuthModule.forRoot({
+  auth,
+  bodyParser: {
+    json: {
+      enabled: true,
+      strict: true,  // Only arrays and objects
+    },
+    urlencoded: { enabled: false },
+  },
+})
+```
+
+## Migration from Deprecated Options
+
+<Warning>
+  The `disableBodyParser` and `enableRawBodyParser` options are deprecated.
+</Warning>
+
+### Before (Deprecated)
+
+```ts
+AuthModule.forRoot({
+  auth,
+  disableBodyParser: true,
+  enableRawBodyParser: true,
+})
+```
+
+### After (Recommended)
+
+```ts
+AuthModule.forRoot({
+  auth,
+  bodyParser: {
+    json: { enabled: false },
+    urlencoded: { enabled: false },
+    rawBody: true,
+  },
+})
+```
+
+## How It Works
+
+The library implements a middleware that:
+
+1. **Skips body parsing for Better Auth routes** - Allows Better Auth to handle raw request bodies
+2. **Re-adds body parsers for all other routes** - Your controllers work as expected
+3. **Optionally enables raw body support** - For webhook signature verification
+
+Here's a simplified flow:
+
+```
+Request → Is it /api/auth/*? 
+          ├─ Yes → Skip body parsing → Better Auth handles it
+          └─ No  → Apply JSON/URL-encoded parsers → Your controller
+```
+
+This ensures Better Auth gets the raw request body it needs while your application routes continue to work normally.

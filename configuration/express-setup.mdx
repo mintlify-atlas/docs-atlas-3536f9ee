@@ -1,0 +1,341 @@
+---
+title: Express Setup
+description: Complete guide for setting up NestJS Better Auth with Express adapter
+---
+
+This guide covers the complete setup for using NestJS Better Auth with the Express adapter (the default NestJS HTTP adapter).
+
+## Prerequisites
+
+- A working NestJS application using Express (default)
+- Better Auth >= 1.5.0 installed and configured
+
+## Installation
+
+```bash
+npm install @thallesp/nestjs-better-auth
+```
+
+## Step 1: Configure Better Auth
+
+Create your Better Auth instance:
+
+```typescript title="auth.ts"
+import { betterAuth } from "better-auth";
+
+export const auth = betterAuth({
+  basePath: "/api/auth",
+  database: {
+    // Your database configuration
+  },
+  emailAndPassword: {
+    enabled: true,
+  },
+  trustedOrigins: ["http://localhost:3000"],
+});
+```
+
+## Step 2: Disable NestJS Body Parser
+
+Disable NestJS's built-in body parser to allow Better Auth to handle the raw request body:
+
+```typescript title="main.ts"
+import { NestFactory } from "@nestjs/core";
+import { AppModule } from "./app.module";
+
+async function bootstrap() {
+  const app = await NestFactory.create(AppModule, {
+    // Disable NestJS's built-in body parser
+    bodyParser: false,
+  });
+  await app.listen(process.env.PORT ?? 3333);
+}
+bootstrap();
+```
+
+<Warning>
+  **Important:** Since we disable NestJS's built-in body parser, the `rawBody: true` option in `NestFactory.create()` has no effect. If you need access to `req.rawBody` (e.g., for webhook signature verification), use `bodyParser.rawBody` in `AuthModule.forRoot()` instead.
+</Warning>
+
+## Step 3: Import AuthModule
+
+Import the `AuthModule` in your root module:
+
+```typescript title="app.module.ts"
+import { Module } from "@nestjs/common";
+import { AuthModule } from "@thallesp/nestjs-better-auth";
+import { auth } from "./auth";
+
+@Module({
+  imports: [
+    AuthModule.forRoot({
+      auth,
+      bodyParser: {
+        json: { limit: "2mb" },
+        urlencoded: { limit: "2mb", extended: true },
+        rawBody: true,
+      },
+    }),
+  ],
+})
+export class AppModule {}
+```
+
+## Body Parser Configuration
+
+The library re-adds JSON and URL-encoded body parsers for non-auth routes. You can customize their behavior:
+
+### Default Configuration
+
+```typescript
+AuthModule.forRoot({
+  auth,
+  // Default body parser settings (optional)
+  bodyParser: {
+    json: {
+      enabled: true,
+      limit: "100kb",
+      strict: true,
+    },
+    urlencoded: {
+      enabled: true,
+      extended: true,
+      limit: "100kb",
+    },
+    rawBody: false,
+  },
+})
+```
+
+### Custom Limits
+
+```typescript
+AuthModule.forRoot({
+  auth,
+  bodyParser: {
+    json: { limit: "5mb" },
+    urlencoded: { limit: "5mb", extended: true },
+  },
+})
+```
+
+### Disable Specific Parsers
+
+```typescript
+// Disable JSON parser only
+AuthModule.forRoot({
+  auth,
+  bodyParser: {
+    json: { enabled: false },
+  },
+})
+
+// Disable URL-encoded parser only
+AuthModule.forRoot({
+  auth,
+  bodyParser: {
+    urlencoded: { enabled: false },
+  },
+})
+```
+
+### Enable Raw Body
+
+For webhook signature verification:
+
+```typescript
+AuthModule.forRoot({
+  auth,
+  bodyParser: {
+    rawBody: true,
+  },
+})
+```
+
+Access the raw body in your controllers:
+
+```typescript
+import { Controller, Post, Request } from "@nestjs/common";
+import type { Request as ExpressRequest } from "express";
+
+@Controller("webhooks")
+export class WebhookController {
+  @Post("stripe")
+  async handleStripeWebhook(@Request() req: ExpressRequest) {
+    const signature = req.headers['stripe-signature'];
+    const rawBody = req.rawBody; // Buffer
+    // Verify signature with raw body
+  }
+}
+```
+
+## CORS Configuration
+
+If you configure `trustedOrigins` in your Better Auth config, the module automatically applies CORS headers for auth routes:
+
+```typescript title="auth.ts"
+export const auth = betterAuth({
+  basePath: "/api/auth",
+  trustedOrigins: [
+    "http://localhost:3000",
+    "https://myapp.com",
+  ],
+});
+```
+
+The module will automatically configure CORS for these origins on auth routes.
+
+### Disable Automatic CORS
+
+If you want to manage CORS yourself:
+
+```typescript
+AuthModule.forRoot({
+  auth,
+  disableTrustedOriginsCors: true,
+})
+```
+
+## Express-Specific Considerations
+
+### Body Parser Middleware
+
+On Express, the library uses the `express.json()` and `express.urlencoded()` parsers under the hood. All options you configure are passed directly to these parsers.
+
+### Request and Response Types
+
+Use Express types in your controllers:
+
+```typescript
+import type { Request, Response } from "express";
+
+@Controller("users")
+export class UserController {
+  @Get("me")
+  async getProfile(@Request() req: Request) {
+    return req.session;
+  }
+}
+```
+
+### Middleware Integration
+
+You can wrap the Better Auth handler with custom middleware:
+
+```typescript
+import type { Request, Response, NextFunction } from "express";
+
+AuthModule.forRoot({
+  auth,
+  middleware: (req: Request, res: Response, next: NextFunction) => {
+    // Custom logic before Better Auth handler
+    console.log(`Auth request: ${req.method} ${req.url}`);
+    next();
+  },
+})
+```
+
+## Complete Example
+
+Here's a complete working example:
+
+```typescript title="main.ts"
+import { NestFactory } from "@nestjs/core";
+import { AppModule } from "./app.module";
+
+async function bootstrap() {
+  const app = await NestFactory.create(AppModule, {
+    bodyParser: false,
+  });
+  await app.listen(3333);
+}
+bootstrap();
+```
+
+```typescript title="auth.ts"
+import { betterAuth } from "better-auth";
+import { prismaAdapter } from "better-auth/adapters/prisma";
+import { prisma } from "./prisma";
+
+export const auth = betterAuth({
+  basePath: "/api/auth",
+  database: prismaAdapter(prisma, {
+    provider: "postgresql",
+  }),
+  emailAndPassword: {
+    enabled: true,
+  },
+  trustedOrigins: ["http://localhost:3000"],
+});
+```
+
+```typescript title="app.module.ts"
+import { Module } from "@nestjs/common";
+import { AuthModule } from "@thallesp/nestjs-better-auth";
+import { auth } from "./auth";
+import { UserController } from "./user.controller";
+
+@Module({
+  imports: [
+    AuthModule.forRoot({
+      auth,
+      bodyParser: {
+        json: { limit: "2mb" },
+        urlencoded: { limit: "2mb", extended: true },
+        rawBody: true,
+      },
+    }),
+  ],
+  controllers: [UserController],
+})
+export class AppModule {}
+```
+
+```typescript title="user.controller.ts"
+import { Controller, Get } from "@nestjs/common";
+import { Session, UserSession } from "@thallesp/nestjs-better-auth";
+
+@Controller("users")
+export class UserController {
+  @Get("me")
+  async getProfile(@Session() session: UserSession) {
+    return session;
+  }
+}
+```
+
+## Troubleshooting
+
+### Body Not Parsed
+
+If request bodies are not being parsed:
+
+1. Verify you've set `bodyParser: false` in `NestFactory.create()`
+2. Check that body parsers are enabled in `AuthModule.forRoot()`
+3. Ensure the Content-Type header matches the parser type
+
+### Raw Body Not Available
+
+If `req.rawBody` is undefined:
+
+1. Set `bodyParser.rawBody: true` in `AuthModule.forRoot()`
+2. Do not use `rawBody: true` in `NestFactory.create()` (it has no effect)
+
+### CORS Issues
+
+If CORS is not working:
+
+1. Verify `trustedOrigins` is set in your Better Auth config
+2. Check that `disableTrustedOriginsCors` is not set to `true`
+3. Ensure the origin header matches one of your trusted origins
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Module Options" icon="gear" href="/configuration/module-options">
+    Complete reference for all configuration options
+  </Card>
+  <Card title="Route Protection" icon="shield" href="/authentication/route-protection">
+    Learn how to protect your routes with guards
+  </Card>
+</CardGroup>

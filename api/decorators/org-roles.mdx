@@ -1,0 +1,356 @@
+---
+title: '@OrgRoles'
+description: Specifies organization-level roles required to access a route or controller
+---
+
+## Overview
+
+`@OrgRoles()` is a decorator that restricts access based on organization member roles. It checks **only** the organization member role from Better Auth's organization plugin and requires an active organization in the session.
+
+Use this for organization-scoped protection (e.g., org admin routes).
+
+## Type Signature
+
+```typescript
+export const OrgRoles = (roles: string[]): CustomDecorator =>
+  SetMetadata("ORG_ROLES", roles);
+```
+
+## Parameters
+
+<ParamField path="roles" type="string[]" required>
+  Array of organization roles that are allowed to access the route. Users with any of these roles in the active organization will be granted access.
+</ParamField>
+
+## Usage
+
+### Basic Usage
+
+```typescript
+import { Controller, Get } from '@nestjs/common';
+import { OrgRoles, Session } from '@better-auth/nestjs';
+import type { UserSession } from '@better-auth/nestjs';
+
+@Controller('organization')
+export class OrganizationController {
+  @OrgRoles(['owner', 'admin'])
+  @Get('settings')
+  getSettings(@Session() session: UserSession) {
+    const orgId = session.session.activeOrganizationId;
+    return this.orgService.getSettings(orgId);
+  }
+}
+```
+
+### Multiple Roles
+
+```typescript
+@Controller('organization')
+export class OrganizationController {
+  @OrgRoles(['owner', 'admin', 'manager'])
+  @Get('members')
+  listMembers(@Session() session: UserSession) {
+    const orgId = session.session.activeOrganizationId;
+    return this.orgService.getMembers(orgId);
+  }
+}
+```
+
+### On a Controller
+
+```typescript
+import { Controller, Get, Post, Delete } from '@nestjs/common';
+import { OrgRoles } from '@better-auth/nestjs';
+
+@OrgRoles(['owner', 'admin'])
+@Controller('organization')
+export class OrganizationController {
+  @Get('billing')
+  getBilling() {
+    return 'Org owners and admins can view billing';
+  }
+
+  @OrgRoles(['owner']) // More restrictive
+  @Delete()
+  deleteOrganization() {
+    return 'Only org owners can delete the organization';
+  }
+}
+```
+
+## Examples
+
+### Organization Settings
+
+```typescript
+@Controller('organization')
+export class OrganizationController {
+  @OrgRoles(['owner', 'admin'])
+  @Get('settings')
+  async getSettings(@Session() session: UserSession) {
+    const orgId = session.session.activeOrganizationId!;
+    return this.orgService.getSettings(orgId);
+  }
+
+  @OrgRoles(['owner', 'admin'])
+  @Patch('settings')
+  async updateSettings(
+    @Session() session: UserSession,
+    @Body() dto: UpdateSettingsDto,
+  ) {
+    const orgId = session.session.activeOrganizationId!;
+    return this.orgService.updateSettings(orgId, dto);
+  }
+}
+```
+
+### Member Management
+
+```typescript
+@Controller('organization/members')
+export class MembersController {
+  @Get()
+  async listMembers(@Session() session: UserSession) {
+    // All org members can view member list
+    const orgId = session.session.activeOrganizationId!;
+    return this.membersService.findByOrganization(orgId);
+  }
+
+  @OrgRoles(['owner', 'admin'])
+  @Post('invite')
+  async inviteMember(
+    @Session() session: UserSession,
+    @Body() dto: InviteMemberDto,
+  ) {
+    const orgId = session.session.activeOrganizationId!;
+    return this.membersService.invite(orgId, dto.email, dto.role);
+  }
+
+  @OrgRoles(['owner'])
+  @Delete(':memberId')
+  async removeMember(
+    @Session() session: UserSession,
+    @Param('memberId') memberId: string,
+  ) {
+    const orgId = session.session.activeOrganizationId!;
+    return this.membersService.remove(orgId, memberId);
+  }
+}
+```
+
+### Billing Management
+
+```typescript
+@Controller('organization/billing')
+export class BillingController {
+  @OrgRoles(['owner', 'admin'])
+  @Get('invoices')
+  async getInvoices(@Session() session: UserSession) {
+    const orgId = session.session.activeOrganizationId!;
+    return this.billingService.getInvoices(orgId);
+  }
+
+  @OrgRoles(['owner'])
+  @Post('subscription')
+  async updateSubscription(
+    @Session() session: UserSession,
+    @Body() dto: UpdateSubscriptionDto,
+  ) {
+    const orgId = session.session.activeOrganizationId!;
+    return this.billingService.updateSubscription(orgId, dto);
+  }
+
+  @OrgRoles(['owner'])
+  @Delete('subscription')
+  async cancelSubscription(@Session() session: UserSession) {
+    const orgId = session.session.activeOrganizationId!;
+    return this.billingService.cancel(orgId);
+  }
+}
+```
+
+### Project Management
+
+```typescript
+@Controller('projects')
+export class ProjectsController {
+  @Get()
+  async listProjects(@Session() session: UserSession) {
+    // All org members can view projects
+    const orgId = session.session.activeOrganizationId!;
+    return this.projectsService.findByOrganization(orgId);
+  }
+
+  @OrgRoles(['owner', 'admin', 'manager'])
+  @Post()
+  async createProject(
+    @Session() session: UserSession,
+    @Body() dto: CreateProjectDto,
+  ) {
+    const orgId = session.session.activeOrganizationId!;
+    return this.projectsService.create(orgId, dto);
+  }
+
+  @OrgRoles(['owner', 'admin'])
+  @Delete(':id')
+  async deleteProject(
+    @Session() session: UserSession,
+    @Param('id') id: string,
+  ) {
+    return this.projectsService.delete(id);
+  }
+}
+```
+
+## Authorization Requirements
+
+For `@OrgRoles()` to work:
+
+1. **User must be authenticated**
+2. **Active organization required** - `session.session.activeOrganizationId` must be set
+3. **User must be a member** of the active organization
+4. **Member role must match** one of the required roles
+
+If any condition fails, a `ForbiddenException` is thrown.
+
+## Active Organization
+
+The decorator checks the `activeOrganizationId` in the session:
+
+```typescript
+@OrgRoles(['admin'])
+@Get('data')
+getData(@Session() session: UserSession) {
+  // session.session.activeOrganizationId must be set
+  const orgId = session.session.activeOrganizationId!;
+  
+  if (!orgId) {
+    // This won't happen - guard already checked
+    throw new BadRequestException('No active organization');
+  }
+  
+  return this.dataService.getForOrganization(orgId);
+}
+```
+
+## Error Handling
+
+The guard throws `ForbiddenException` when:
+
+- No active organization in session
+- User is not a member of the organization
+- User's role doesn't match required roles
+- Organization plugin API fails
+
+```typescript
+// HTTP Context
+throw new ForbiddenException({
+  code: 'FORBIDDEN',
+  message: 'Insufficient permissions',
+});
+```
+
+## Setup Requirements
+
+1. **Enable the organization plugin**:
+
+```typescript
+import { betterAuth } from 'better-auth';
+import { organization } from 'better-auth/plugins';
+
+export const auth = betterAuth({
+  database: /* ... */,
+  plugins: [
+    organization(), // Adds organization and member tables
+  ],
+});
+```
+
+2. **Set active organization** in the client:
+
+```typescript
+// Client-side: Set active organization
+await authClient.organization.setActive({
+  organizationId: 'org-id',
+});
+```
+
+3. **Assign roles to members**:
+
+```typescript
+// Add member with role
+await authService.api.addMember({
+  body: {
+    organizationId: 'org-id',
+    userId: 'user-id',
+    role: 'admin',
+  },
+});
+
+// Update member role
+await authService.api.updateMemberRole({
+  body: {
+    organizationId: 'org-id',
+    userId: 'user-id',
+    role: 'owner',
+  },
+});
+```
+
+## Common Organization Roles
+
+Typical organization role hierarchy:
+
+- **`owner`** - Full control, can delete organization
+- **`admin`** - Manage settings, members, billing
+- **`manager`** - Manage projects and resources
+- **`member`** - Basic access to organization resources
+- **`guest`** - Limited read-only access
+
+## Comparison with @Roles
+
+| Feature | @OrgRoles | @Roles |
+|---------|-----------|--------|
+| Checks | Organization member role | `user.role` |
+| Plugin required | Organization | Admin |
+| Scope | Organization-specific | System-wide |
+| Active org required | Yes | No |
+| Use case | Org management | App administration |
+
+## When to Use
+
+Use `@OrgRoles()` for:
+
+- **Organization settings** - Name, logo, preferences
+- **Member management** - Invites, role changes
+- **Billing and subscriptions** - Payment methods, plans
+- **Resource management** - Projects, teams within org
+- **Organization-specific features** - Anything scoped to an org
+
+Use [`@Roles()`](/api/decorators/roles) for:
+
+- **System administration** - App-level admin features
+- **Global moderation** - Cross-organization moderation
+- **Platform features** - Not tied to organizations
+
+## Notes
+
+- Requires Better Auth organization plugin
+- Requires active organization in session
+- Does **not** check `user.role` (use `@Roles()` for that)
+- Method-level decorator overrides controller-level
+- Can be combined with `@MemberHasPermission()` for fine-grained control
+
+## Related
+
+<CardGroup cols={3}>
+  <Card title="@Roles" href="/api/decorators/roles" icon="user-shield">
+    User role authorization
+  </Card>
+  <Card title="@MemberHasPermission" href="/api/decorators/member-has-permission" icon="key">
+    Member permission checks
+  </Card>
+  <Card title="AuthGuard" href="/api/auth-guard" icon="shield">
+    Authentication guard
+  </Card>
+</CardGroup>

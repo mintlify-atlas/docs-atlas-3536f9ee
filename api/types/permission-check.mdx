@@ -1,0 +1,398 @@
+---
+title: 'PermissionCheck'
+description: Type for permission checks - maps resource names to arrays of actions
+---
+
+## Overview
+
+`PermissionCheck` is a TypeScript type that defines the structure for permission checks in NestJS Better Auth. It's used by `@UserHasPermission()` and `@MemberHasPermission()` decorators to specify required permissions.
+
+## Type Definition
+
+```typescript
+export type PermissionCheck = Record<string, string[]>;
+```
+
+This is a record (object) where:
+- **Keys** are resource names (e.g., `'project'`, `'invoice'`, `'user'`)
+- **Values** are arrays of action names (e.g., `['create', 'read', 'update', 'delete']`)
+
+## Structure
+
+```typescript
+{
+  [resourceName: string]: string[]; // array of actions
+}
+```
+
+## Usage
+
+### Single Resource, Single Action
+
+```typescript
+import { UserHasPermission } from '@better-auth/nestjs';
+import type { PermissionCheck } from '@better-auth/nestjs';
+
+const permissions: PermissionCheck = {
+  project: ['create'],
+};
+
+@UserHasPermission({ permission: permissions })
+@Post('projects')
+createProject() {
+  return 'User can create projects';
+}
+```
+
+### Single Resource, Multiple Actions
+
+```typescript
+const permissions: PermissionCheck = {
+  project: ['create', 'update', 'delete'],
+};
+
+@UserHasPermission({ permission: permissions })
+@Post('projects')
+manageProject() {
+  return 'User can create, update, and delete projects';
+}
+```
+
+### Multiple Resources
+
+```typescript
+const permissions: PermissionCheck = {
+  invoice: ['create', 'approve'],
+  payment: ['process'],
+  customer: ['read'],
+};
+
+@UserHasPermission({ permissions })
+@Post('invoice/approve')
+approveInvoice() {
+  return 'User can work with invoices, payments, and customers';
+}
+```
+
+## Common Permission Patterns
+
+### CRUD Operations
+
+```typescript
+// Create
+const createPermission: PermissionCheck = {
+  resource: ['create'],
+};
+
+// Read
+const readPermission: PermissionCheck = {
+  resource: ['read'],
+};
+
+// Update
+const updatePermission: PermissionCheck = {
+  resource: ['update'],
+};
+
+// Delete
+const deletePermission: PermissionCheck = {
+  resource: ['delete'],
+};
+
+// Full CRUD
+const fullPermission: PermissionCheck = {
+  resource: ['create', 'read', 'update', 'delete'],
+};
+```
+
+### Common Resource Names
+
+```typescript
+// User management
+const userPermissions: PermissionCheck = {
+  user: ['create', 'read', 'update', 'delete', 'ban'],
+};
+
+// Project management
+const projectPermissions: PermissionCheck = {
+  project: ['create', 'read', 'update', 'delete', 'archive'],
+};
+
+// Financial operations
+const financialPermissions: PermissionCheck = {
+  invoice: ['create', 'view', 'approve', 'cancel'],
+  payment: ['process', 'refund'],
+  subscription: ['manage', 'cancel'],
+};
+
+// Content management
+const contentPermissions: PermissionCheck = {
+  content: ['create', 'edit', 'publish', 'delete', 'moderate'],
+};
+
+// Team management
+const teamPermissions: PermissionCheck = {
+  team: ['create', 'manage', 'delete'],
+  member: ['invite', 'remove', 'assign'],
+};
+```
+
+## Examples
+
+### User-Level Permissions
+
+```typescript
+import { Controller, Post, Get, Delete } from '@nestjs/common';
+import { UserHasPermission } from '@better-auth/nestjs';
+import type { PermissionCheck } from '@better-auth/nestjs';
+
+@Controller('projects')
+export class ProjectsController {
+  @UserHasPermission({ permission: { project: ['create'] } })
+  @Post()
+  create() {
+    return 'Create project';
+  }
+
+  @UserHasPermission({ permission: { project: ['read'] } })
+  @Get()
+  findAll() {
+    return 'List projects';
+  }
+
+  @UserHasPermission({ permission: { project: ['update'] } })
+  @Patch(':id')
+  update() {
+    return 'Update project';
+  }
+
+  @UserHasPermission({ permission: { project: ['delete'] } })
+  @Delete(':id')
+  remove() {
+    return 'Delete project';
+  }
+}
+```
+
+### Organization Member Permissions
+
+```typescript
+import { MemberHasPermission } from '@better-auth/nestjs';
+
+@Controller('organization/invoices')
+export class InvoicesController {
+  @MemberHasPermission({ permissions: { invoice: ['create'] } })
+  @Post()
+  create() {
+    return 'Create invoice';
+  }
+
+  @MemberHasPermission({ 
+    permissions: { 
+      invoice: ['approve'],
+      payment: ['process']
+    } 
+  })
+  @Post(':id/approve')
+  approve() {
+    return 'Approve and process invoice';
+  }
+}
+```
+
+### Complex Permission Requirements
+
+```typescript
+@Controller('sales')
+export class SalesController {
+  @UserHasPermission({ 
+    permissions: {
+      sale: ['create', 'update'],
+      product: ['read'],
+      customer: ['read', 'update'],
+      inventory: ['update'],
+    }
+  })
+  @Post()
+  createSale() {
+    return 'Create sale with access to multiple resources';
+  }
+}
+```
+
+### Reusable Permission Constants
+
+```typescript
+// permissions.constants.ts
+export const PROJECT_PERMISSIONS = {
+  CREATE: { project: ['create'] } as PermissionCheck,
+  READ: { project: ['read'] } as PermissionCheck,
+  UPDATE: { project: ['update'] } as PermissionCheck,
+  DELETE: { project: ['delete'] } as PermissionCheck,
+  MANAGE: { project: ['create', 'read', 'update', 'delete'] } as PermissionCheck,
+};
+
+export const INVOICE_PERMISSIONS = {
+  CREATE: { invoice: ['create'] } as PermissionCheck,
+  VIEW: { invoice: ['view'] } as PermissionCheck,
+  APPROVE: { 
+    invoice: ['approve'],
+    payment: ['process']
+  } as PermissionCheck,
+};
+
+// Usage in controller
+import { PROJECT_PERMISSIONS } from './permissions.constants';
+
+@Controller('projects')
+export class ProjectsController {
+  @UserHasPermission({ permission: PROJECT_PERMISSIONS.CREATE })
+  @Post()
+  create() {
+    return 'Create project';
+  }
+
+  @UserHasPermission({ permission: PROJECT_PERMISSIONS.MANAGE })
+  @Put(':id')
+  update() {
+    return 'Manage project';
+  }
+}
+```
+
+## Better Auth Configuration
+
+Define permissions in your Better Auth config:
+
+### User-Level Access Control
+
+```typescript
+import { betterAuth } from 'better-auth';
+import { admin } from 'better-auth/plugins';
+
+export const auth = betterAuth({
+  database: /* ... */,
+  plugins: [
+    admin({
+      ac: {
+        roles: {
+          admin: {
+            permissions: {
+              project: ['create', 'read', 'update', 'delete'],
+              user: ['create', 'read', 'update', 'delete', 'ban'],
+              invoice: ['create', 'view', 'approve', 'cancel'],
+            },
+          },
+          user: {
+            permissions: {
+              project: ['create', 'read', 'update'],
+              profile: ['read', 'update'],
+            },
+          },
+        },
+      },
+    }),
+  ],
+});
+```
+
+### Organization-Level Access Control
+
+```typescript
+import { organization } from 'better-auth/plugins';
+
+export const auth = betterAuth({
+  database: /* ... */,
+  plugins: [
+    organization({
+      ac: {
+        roles: {
+          owner: {
+            permissions: {
+              project: ['create', 'read', 'update', 'delete'],
+              invoice: ['create', 'view', 'approve'],
+              member: ['invite', 'remove', 'manage'],
+            },
+          },
+          admin: {
+            permissions: {
+              project: ['create', 'read', 'update'],
+              invoice: ['create', 'view'],
+              member: ['invite'],
+            },
+          },
+          member: {
+            permissions: {
+              project: ['read'],
+              invoice: ['view'],
+            },
+          },
+        },
+      },
+    }),
+  ],
+});
+```
+
+## Validation
+
+PermissionCheck structure is validated at runtime:
+
+```typescript
+// ✅ Valid
+const valid: PermissionCheck = {
+  project: ['create'],
+};
+
+// ✅ Valid - multiple resources
+const valid2: PermissionCheck = {
+  project: ['create', 'update'],
+  user: ['read'],
+};
+
+// ❌ Invalid - empty array
+const invalid: PermissionCheck = {
+  project: [], // Should have at least one action
+};
+
+// ❌ Invalid - not an array
+const invalid2: PermissionCheck = {
+  project: 'create', // Should be array
+};
+```
+
+## Type Safety
+
+Create typed permission constants for your application:
+
+```typescript
+// app-permissions.ts
+export type AppResource = 'project' | 'invoice' | 'user' | 'team';
+export type AppAction = 'create' | 'read' | 'update' | 'delete' | 'approve';
+
+export type AppPermissionCheck = Record<AppResource, AppAction[]>;
+
+// Usage
+const permissions: AppPermissionCheck = {
+  project: ['create', 'update'], // TypeScript validates resource and action names
+};
+```
+
+## Notes
+
+- Resource names are case-sensitive
+- Action names are case-sensitive
+- Must match your Better Auth access control configuration
+- Empty action arrays are not valid
+- Used by both user-level and organization-level permission checks
+
+## Related
+
+<CardGroup cols={2}>
+  <Card title="@UserHasPermission" href="/api/decorators/user-has-permission" icon="key">
+    User permission decorator
+  </Card>
+  <Card title="@MemberHasPermission" href="/api/decorators/member-has-permission" icon="key">
+    Member permission decorator
+  </Card>
+</CardGroup>

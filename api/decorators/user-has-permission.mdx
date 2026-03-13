@@ -1,0 +1,382 @@
+---
+title: '@UserHasPermission'
+description: Specifies user permissions required to access a route or controller
+---
+
+## Overview
+
+`@UserHasPermission()` is a decorator that restricts access based on user-level permissions using Better Auth's access control system. It provides fine-grained permission-based authorization independent of organizations.
+
+## Type Signature
+
+```typescript
+export const UserHasPermission = (
+  options: UserHasPermissionOptions,
+): CustomDecorator => { /* ... */ }
+```
+
+## Parameters
+
+<ParamField path="options" type="UserHasPermissionOptions" required>
+  Permission check configuration
+  
+  <Expandable title="properties">
+    <ParamField path="permission" type="PermissionCheck">
+      Single permission to check. Must use this **or** `permissions` (not both).
+      
+      Format: `{ resourceName: ["action1", "action2"] }`
+    </ParamField>
+    
+    <ParamField path="permissions" type="PermissionCheck">
+      Multiple permissions to check. Must use this **or** `permission` (not both).
+      
+      Format: `{ resource1: ["action1"], resource2: ["action2"] }`
+    </ParamField>
+    
+    <ParamField path="userId" type="string">
+      The user ID to check permissions for. Optional - defaults to current authenticated user.
+    </ParamField>
+    
+    <ParamField path="role" type="string">
+      Server-only role to check permissions for. Optional - overrides user's actual role.
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+## Usage
+
+### Single Permission
+
+```typescript
+import { Controller, Post } from '@nestjs/common';
+import { UserHasPermission } from '@better-auth/nestjs';
+
+@Controller('projects')
+export class ProjectsController {
+  @UserHasPermission({ permission: { project: ["create"] } })
+  @Post()
+  createProject() {
+    return 'User can create projects';
+  }
+}
+```
+
+### Multiple Actions on Same Resource
+
+```typescript
+@Controller('projects')
+export class ProjectsController {
+  @UserHasPermission({ permission: { project: ["create", "update"] } })
+  @Post()
+  createProject() {
+    return 'User can both create and update projects';
+  }
+}
+```
+
+### Multiple Resources
+
+```typescript
+@Controller('analytics')
+export class AnalyticsController {
+  @UserHasPermission({ 
+    permissions: { 
+      analytics: ["view"], 
+      reports: ["generate"] 
+    } 
+  })
+  @Get('reports')
+  generateReport() {
+    return 'User can view analytics and generate reports';
+  }
+}
+```
+
+### Server-Only Role Override
+
+```typescript
+@Controller('admin')
+export class AdminController {
+  @UserHasPermission({ 
+    role: "admin", 
+    permission: { users: ["delete"] } 
+  })
+  @Delete('users/:id')
+  deleteUser(@Param('id') id: string) {
+    return 'Check admin role permissions to delete users';
+  }
+}
+```
+
+## Examples
+
+### CRUD Operations
+
+```typescript
+@Controller('posts')
+export class PostsController {
+  @UserHasPermission({ permission: { post: ["create"] } })
+  @Post()
+  create(@Body() dto: CreatePostDto) {
+    return this.postsService.create(dto);
+  }
+
+  @UserHasPermission({ permission: { post: ["read"] } })
+  @Get()
+  findAll() {
+    return this.postsService.findAll();
+  }
+
+  @UserHasPermission({ permission: { post: ["update"] } })
+  @Patch(':id')
+  update(@Param('id') id: string, @Body() dto: UpdatePostDto) {
+    return this.postsService.update(id, dto);
+  }
+
+  @UserHasPermission({ permission: { post: ["delete"] } })
+  @Delete(':id')
+  remove(@Param('id') id: string) {
+    return this.postsService.remove(id);
+  }
+}
+```
+
+### Complex Permissions
+
+```typescript
+@Controller('sales')
+export class SalesController {
+  @UserHasPermission({ 
+    permissions: { 
+      sale: ["create", "update"], 
+      product: ["read"], 
+      customer: ["read"] 
+    } 
+  })
+  @Post()
+  createSale(@Body() dto: CreateSaleDto) {
+    // User needs permissions on multiple resources
+    return this.salesService.create(dto);
+  }
+}
+```
+
+### Admin Features
+
+```typescript
+@Controller('admin/users')
+export class AdminUsersController {
+  @UserHasPermission({ permission: { user: ["read"] } })
+  @Get()
+  listUsers() {
+    return this.usersService.findAll();
+  }
+
+  @UserHasPermission({ permission: { user: ["update"] } })
+  @Patch(':id')
+  updateUser(@Param('id') id: string, @Body() dto: UpdateUserDto) {
+    return this.usersService.update(id, dto);
+  }
+
+  @UserHasPermission({ permission: { user: ["delete"] } })
+  @Delete(':id')
+  deleteUser(@Param('id') id: string) {
+    return this.usersService.remove(id);
+  }
+}
+```
+
+### Financial Operations
+
+```typescript
+@Controller('invoices')
+export class InvoicesController {
+  @UserHasPermission({ permission: { invoice: ["view"] } })
+  @Get()
+  listInvoices() {
+    return this.invoicesService.findAll();
+  }
+
+  @UserHasPermission({ permission: { invoice: ["create"] } })
+  @Post()
+  createInvoice(@Body() dto: CreateInvoiceDto) {
+    return this.invoicesService.create(dto);
+  }
+
+  @UserHasPermission({ 
+    permissions: { 
+      invoice: ["approve"], 
+      payment: ["process"] 
+    } 
+  })
+  @Post(':id/approve')
+  approveInvoice(@Param('id') id: string) {
+    return this.invoicesService.approve(id);
+  }
+}
+```
+
+### Content Management
+
+```typescript
+@Controller('content')
+export class ContentController {
+  @UserHasPermission({ permission: { content: ["publish"] } })
+  @Post(':id/publish')
+  publish(@Param('id') id: string) {
+    return this.contentService.publish(id);
+  }
+
+  @UserHasPermission({ 
+    permissions: { 
+      content: ["moderate"], 
+      user: ["ban"] 
+    } 
+  })
+  @Post('moderate')
+  moderateContent(@Body() dto: ModerateDto) {
+    return this.contentService.moderate(dto);
+  }
+}
+```
+
+## Permission Check Logic
+
+The decorator uses Better Auth's `userHasPermission` API:
+
+```typescript
+const result = await authApi.userHasPermission({
+  body: {
+    userId: session.user.id,
+    permissions: { project: ["create", "update"] },
+  },
+  headers,
+});
+
+if (result?.success) {
+  // Permission granted
+} else {
+  // Permission denied
+}
+```
+
+## Setup Requirements
+
+1. **Configure access control** in Better Auth:
+
+```typescript
+import { betterAuth } from 'better-auth';
+import { admin } from 'better-auth/plugins';
+
+export const auth = betterAuth({
+  database: /* ... */,
+  plugins: [
+    admin({
+      ac: {
+        roles: {
+          admin: {
+            permissions: {
+              project: ["create", "read", "update", "delete"],
+              user: ["read", "update"],
+            },
+          },
+          user: {
+            permissions: {
+              project: ["create", "read"],
+              profile: ["update"],
+            },
+          },
+        },
+      },
+    }),
+  ],
+});
+```
+
+2. **Assign roles to users**:
+
+```typescript
+await authService.api.updateUser({
+  body: {
+    userId: 'user-id',
+    role: 'admin',
+  },
+});
+```
+
+## Error Handling
+
+When permission check fails:
+
+```typescript
+throw new ForbiddenException({
+  code: 'FORBIDDEN',
+  message: 'Insufficient permissions',
+});
+```
+
+## Validation
+
+The decorator validates that either `permission` or `permissions` is provided:
+
+```typescript
+// ❌ Invalid - missing both
+@UserHasPermission({})
+
+// ✅ Valid - using permission
+@UserHasPermission({ permission: { project: ["create"] } })
+
+// ✅ Valid - using permissions
+@UserHasPermission({ permissions: { project: ["create"] } })
+
+// ❌ Invalid - using both (though technically allowed, use one for clarity)
+@UserHasPermission({ 
+  permission: { project: ["create"] },
+  permissions: { user: ["read"] }
+})
+```
+
+## Comparison with Other Decorators
+
+| Decorator | Checks | Scope | Active Org Required |
+|-----------|--------|-------|--------------------|
+| `@UserHasPermission` | User permissions | User-level | No |
+| `@MemberHasPermission` | Member permissions | Organization-level | Yes |
+| `@Roles` | User role | User-level | No |
+| `@OrgRoles` | Member role | Organization-level | Yes |
+
+## When to Use
+
+Use `@UserHasPermission()` for:
+
+- **Fine-grained access control** - Beyond simple roles
+- **Resource-based permissions** - Per-resource actions
+- **User-level permissions** - Not tied to organizations
+- **Complex authorization** - Multiple resource checks
+
+Use [`@MemberHasPermission()`](/api/decorators/member-has-permission) for:
+
+- **Organization-scoped permissions** - Within org context
+- **Team-based access** - Per-organization member permissions
+
+## Notes
+
+- Requires Better Auth access control configuration
+- Permissions are checked against user's assigned role
+- Method-level decorator overrides controller-level
+- User must be authenticated before permission check
+- Can be combined with `@Roles()` for additional validation
+
+## Related
+
+<CardGroup cols={3}>
+  <Card title="@MemberHasPermission" href="/api/decorators/member-has-permission" icon="key">
+    Member permission checks
+  </Card>
+  <Card title="@Roles" href="/api/decorators/roles" icon="user-shield">
+    User role checks
+  </Card>
+  <Card title="PermissionCheck" href="/api/types/permission-check" icon="circle-info">
+    Permission type definition
+  </Card>
+</CardGroup>

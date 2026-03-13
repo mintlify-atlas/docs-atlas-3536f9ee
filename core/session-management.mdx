@@ -1,0 +1,538 @@
+---
+title: 'Session Management'
+description: 'Understanding how sessions are validated and attached to requests'
+icon: 'user-lock'
+---
+
+Session management in NestJS Better Auth handles user authentication state across requests. This guide explains how sessions are validated, attached to requests, and made available to your application.
+
+## Overview
+
+Session management involves:
+
+- **Session validation** - Verifying session cookies on each request
+- **Request attachment** - Adding session data to request objects
+- **Type-safe access** - Providing TypeScript types for session data
+- **Context support** - Working across HTTP, GraphQL, and WebSocket contexts
+
+## Session Flow
+
+Here's how session management works on each request:
+
+```mermaid
+sequence
+  Client->>AuthGuard: Request with session cookie
+  AuthGuard->>Better Auth: Validate session
+  Better Auth-->>AuthGuard: UserSession or null
+  AuthGuard->>Request: Attach session & user
+  AuthGuard->>Decorators: Check @AllowAnonymous, @Roles, etc.
+  AuthGuard-->>Handler: Allow or Deny
+  Handler->>Client: Response
+```
+
+### Step-by-Step Process
+
+1. **Request arrives** - Client sends request with session cookie
+2. **Guard intercepts** - AuthGuard runs before route handler
+3. **Session validation** - Better Auth validates the session
+4. **Attachment** - Session is attached to `req.session` and `req.user`
+5. **Authorization** - Guard checks decorators for access rules
+6. **Handler execution** - Your route handler receives authenticated request
+
+## UserSession Type
+
+The `UserSession` type represents an authenticated user session:
+
+```typescript
+export type BaseUserSession = NonNullable<
+  Awaited<ReturnType<ReturnType<typeof getSession>>>
+>;
+
+export type UserSession = BaseUserSession & {
+  user: BaseUserSession['user'] & {
+    role?: string | string[];
+  };
+  session: BaseUserSession['session'] & {
+    activeOrganizationId?: string;
+  };
+};
+```
+
+**Source:** `/workspace/source/src/auth-guard.ts:25-36`
+
+### Session Structure
+
+A valid `UserSession` contains:
+
+```typescript
+{
+  user: {
+    id: string;
+    email: string;
+    name: string;
+    image?: string;
+    emailVerified: boolean;
+    role?: string | string[]; // From admin plugin
+    // ... other user fields
+  },
+  session: {
+    id: string;
+    userId: string;
+    expiresAt: Date;
+    token: string;
+    activeOrganizationId?: string; // From organization plugin
+    // ... other session fields
+  }
+}
+```
+
+### Extended Fields
+
+The type includes extensions for Better Auth plugins:
+
+- **`user.role`** - User roles from the [admin plugin](https://www.better-auth.com/docs/plugins/admin)
+- **`session.activeOrganizationId`** - Active organization from the [organization plugin](https://www.better-auth.com/docs/plugins/organization)
+
+## Accessing Session Data
+
+### Using @Session() Decorator
+
+The recommended way to access session data:
+
+```typescript
+import { Controller, Get } from '@nestjs/common';
+import { Session, UserSession } from '@thallesp/nestjs-better-auth';
+
+@Controller('users')
+export class UserController {
+  @Get('me')
+  async getProfile(@Session() session: UserSession) {
+    return {
+      id: session.user.id,
+      email: session.user.email,
+      name: session.user.name,
+    };
+  }
+}
+```
+
+See the [@Session() decorator documentation](/api/decorators/session) for more details.
+
+### Using Request Object
+
+Access session data directly from the request:
+
+```typescript
+import { Controller, Get, Request } from '@nestjs/common';
+import type { Request as ExpressRequest } from 'express';
+import type { UserSession } from '@thallesp/nestjs-better-auth';
+
+// Extend Express Request type
+declare module 'express' {
+  interface Request {
+    session?: UserSession | null;
+    user?: UserSession['user'] | null;
+  }
+}
+
+@Controller('users')
+export class UserController {
+  @Get('me')
+  async getProfile(@Request() req: ExpressRequest) {
+    return {
+      session: req.session, // Full session object
+      user: req.user,       // User object only
+    };
+  }
+}
+```
+
+### Session vs User
+
+Both `req.session` and `req.user` are attached by AuthGuard:
+
+- **`req.session`** - Complete session object with user and session data
+- **`req.user`** - Direct reference to `session.user` (useful for observability tools)
+
+```typescript
+// These are equivalent:
+const userId = req.session?.user.id;
+const userId = req.user?.id;
+
+// But session gives you more:
+const sessionId = req.session?.session.id;
+const expiresAt = req.session?.session.expiresAt;
+```
+
+## Session Validation
+
+AuthGuard validates sessions using Better Auth's `getSession` API:
+
+```typescript
+const session: UserSession | null = await this.options.auth.api.getSession({
+  headers: fromNodeHeaders(
+    request.headers || request?.handshake?.headers || []
+  ),
+});
+
+request.session = session;
+request.user = session?.user ?? null;
+```
+
+**Source:** `/workspace/source/src/auth-guard.ts:129-136`
+
+### When Validation Occurs
+
+Session validation happens:
+
+- **On every request** - AuthGuard runs globally by default
+- **Before route handlers** - Ensures session is available in controllers
+- **Before authorization checks** - Roles and permissions need validated sessions
+
+### Session Null Handling
+
+The guard handles missing sessions based on decorators:
+
+```typescript
+// No decorator = Authentication required
+@Get('protected')
+protected() {
+  // session is never null here
+}
+
+// @AllowAnonymous = No authentication
+@Get('public')
+@AllowAnonymous()
+public() {
+  // session is not available
+}
+
+// @OptionalAuth = Session may be null
+@Get('optional')
+@OptionalAuth()
+optional(@Session() session: UserSession | null) {
+  if (session) {
+    // Authenticated user
+  } else {
+    // Anonymous user
+  }
+}
+```
+
+## Working with Sessions
+
+### Checking Authentication Status
+
+In routes with `@OptionalAuth()`:
+
+```typescript
+import { Controller, Get } from '@nestjs/common';
+import { OptionalAuth, Session, UserSession } from '@thallesp/nestjs-better-auth';
+
+@Controller('posts')
+export class PostController {
+  @Get()
+  @OptionalAuth()
+  async list(@Session() session: UserSession | null) {
+    const isAuthenticated = session !== null;
+    
+    if (isAuthenticated) {
+      return this.getPersonalizedPosts(session.user.id);
+    } else {
+      return this.getPublicPosts();
+    }
+  }
+}
+```
+
+### Accessing User Information
+
+```typescript
+import { Controller, Get, Post, Body } from '@nestjs/common';
+import { Session, UserSession } from '@thallesp/nestjs-better-auth';
+
+@Controller('profile')
+export class ProfileController {
+  @Get()
+  async getProfile(@Session() session: UserSession) {
+    return {
+      id: session.user.id,
+      email: session.user.email,
+      name: session.user.name,
+      emailVerified: session.user.emailVerified,
+      image: session.user.image,
+    };
+  }
+
+  @Post('update')
+  async updateProfile(
+    @Session() session: UserSession,
+    @Body() data: { name: string },
+  ) {
+    const userId = session.user.id;
+    // Update user...
+  }
+}
+```
+
+### Checking Roles
+
+When using the admin plugin:
+
+```typescript
+import { Controller, Get } from '@nestjs/common';
+import { Session, UserSession } from '@thallesp/nestjs-better-auth';
+
+@Controller('dashboard')
+export class DashboardController {
+  @Get()
+  async getDashboard(@Session() session: UserSession) {
+    const role = session.user.role;
+    
+    if (role === 'admin' || (Array.isArray(role) && role.includes('admin'))) {
+      return this.getAdminDashboard();
+    } else {
+      return this.getUserDashboard();
+    }
+  }
+}
+```
+
+<Note>
+  Use the `@Roles()` decorator instead of manual role checks. See [Roles documentation](/api/decorators/roles).
+</Note>
+
+### Working with Organizations
+
+When using the organization plugin:
+
+```typescript
+import { Controller, Get } from '@nestjs/common';
+import { Session, UserSession } from '@thallesp/nestjs-better-auth';
+
+@Controller('org')
+export class OrgController {
+  @Get('current')
+  async getCurrentOrg(@Session() session: UserSession) {
+    const orgId = session.session.activeOrganizationId;
+    
+    if (!orgId) {
+      throw new BadRequestException('No active organization');
+    }
+    
+    return this.getOrganization(orgId);
+  }
+}
+```
+
+## Session in Different Contexts
+
+### HTTP Context (REST)
+
+Standard Express/Fastify requests:
+
+```typescript
+import { Controller, Get } from '@nestjs/common';
+import { Session, UserSession } from '@thallesp/nestjs-better-auth';
+
+@Controller('api')
+export class ApiController {
+  @Get('me')
+  async getMe(@Session() session: UserSession) {
+    return session.user;
+  }
+}
+```
+
+### GraphQL Context
+
+GraphQL resolvers:
+
+```typescript
+import { Resolver, Query } from '@nestjs/graphql';
+import { Session, UserSession } from '@thallesp/nestjs-better-auth';
+import { User } from './user.entity';
+
+@Resolver(() => User)
+export class UserResolver {
+  @Query(() => User)
+  async me(@Session() session: UserSession) {
+    return session.user;
+  }
+}
+```
+
+### WebSocket Context
+
+WebSocket gateways:
+
+```typescript
+import { WebSocketGateway, SubscribeMessage } from '@nestjs/websockets';
+import { UseGuards } from '@nestjs/common';
+import { AuthGuard, Session, UserSession } from '@thallesp/nestjs-better-auth';
+
+@WebSocketGateway()
+@UseGuards(AuthGuard) // Required for WebSocket
+export class EventsGateway {
+  @SubscribeMessage('whoami')
+  handleWhoAmI(@Session() session: UserSession) {
+    return {
+      event: 'identity',
+      data: session.user,
+    };
+  }
+}
+```
+
+## Session Lifecycle
+
+### Session Creation
+
+Sessions are created by Better Auth during authentication:
+
+```typescript
+// Client calls Better Auth sign-in endpoint
+POST /api/auth/sign-in/email
+{
+  "email": "user@example.com",
+  "password": "password123"
+}
+
+// Better Auth:
+// 1. Validates credentials
+// 2. Creates session in database
+// 3. Sets session cookie
+// 4. Returns user data
+```
+
+NestJS Better Auth doesn't handle session creation - Better Auth does. The AuthModule just validates existing sessions.
+
+### Session Expiration
+
+Sessions expire based on Better Auth configuration:
+
+```typescript title="auth.ts"
+import { betterAuth } from 'better-auth';
+
+export const auth = betterAuth({
+  session: {
+    expiresIn: 60 * 60 * 24 * 7, // 7 days
+    updateAge: 60 * 60 * 24, // Update session every 24 hours
+  },
+});
+```
+
+Expired sessions return `null` from `getSession()`, triggering authentication errors.
+
+### Session Refresh
+
+Better Auth automatically refreshes sessions:
+
+- **On activity** - When `updateAge` threshold is reached
+- **Before expiry** - To keep active users logged in
+- **Transparently** - No action needed from your NestJS app
+
+## Best Practices
+
+### Use Type-Safe Decorators
+
+Prefer `@Session()` over `@Request()`:
+
+```typescript
+// ✅ Good - Type-safe and clean
+async handler(@Session() session: UserSession) {
+  return session.user.email;
+}
+
+// ⚠️ Okay - But requires manual typing
+async handler(@Request() req: ExpressRequest) {
+  return req.session?.user.email;
+}
+```
+
+### Handle Null Sessions
+
+With `@OptionalAuth()`, always check for null:
+
+```typescript
+// ✅ Good - Null check
+@OptionalAuth()
+async handler(@Session() session: UserSession | null) {
+  if (!session) {
+    return { anonymous: true };
+  }
+  return { userId: session.user.id };
+}
+
+// ❌ Bad - Will crash on null
+@OptionalAuth()
+async handler(@Session() session: UserSession) {
+  return { userId: session.user.id }; // Error if session is null
+}
+```
+
+### Leverage AuthGuard
+
+Let the guard handle authentication:
+
+```typescript
+// ✅ Good - Guard ensures session exists
+@Get('protected')
+async handler(@Session() session: UserSession) {
+  // session is never null here
+}
+
+// ❌ Bad - Manual checks are redundant
+@Get('protected')
+async handler(@Session() session: UserSession) {
+  if (!session) {
+    throw new UnauthorizedException(); // AuthGuard already does this
+  }
+}
+```
+
+### Use Decorators for Authorization
+
+Don't manually check roles or permissions:
+
+```typescript
+// ✅ Good - Declarative authorization
+@Roles(['admin'])
+async handler(@Session() session: UserSession) {
+  return this.adminData();
+}
+
+// ❌ Bad - Manual authorization
+async handler(@Session() session: UserSession) {
+  if (session.user.role !== 'admin') {
+    throw new ForbiddenException();
+  }
+  return this.adminData();
+}
+```
+
+## Source Reference
+
+Key implementation files:
+
+- **UserSession type:** `/workspace/source/src/auth-guard.ts:25-36`
+- **Session validation:** `/workspace/source/src/auth-guard.ts:129-136`
+- **Request attachment:** `/workspace/source/src/auth-guard.ts:135-136`
+- **Session decorator:** Implementation in decorators module
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="@Session() Decorator" icon="at" href="/api/decorators/session">
+    Learn how to use the Session decorator
+  </Card>
+  <Card title="AuthGuard" icon="shield-halved" href="/core/auth-guard">
+    Understand how authentication works
+  </Card>
+  <Card title="Roles & Permissions" icon="users-gear" href="/api/decorators/roles">
+    Implement authorization with decorators
+  </Card>
+  <Card title="Better Auth Session" icon="book" href="https://www.better-auth.com/docs/concepts/session">
+    Learn about Better Auth sessions
+  </Card>
+</CardGroup>

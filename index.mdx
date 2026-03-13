@@ -1,97 +1,125 @@
 ---
-title: "Introduction"
-description: "Welcome to the new home for your documentation"
+title: "NestJS Better Auth"
+description: "A comprehensive NestJS integration library for Better Auth, providing seamless authentication and authorization for your NestJS applications."
 ---
 
-## Setting up
+<img
+  className="block dark:hidden"
+  src="https://media.brand.dev/ecf4517c-7cbd-4cc9-a2d4-d0ce01e684f4.svg"
+  alt="Better Auth Logo"
+/>
+<img
+  className="hidden dark:block"
+  src="https://media.brand.dev/ecf4517c-7cbd-4cc9-a2d4-d0ce01e684f4.svg"
+  alt="Better Auth Logo"
+/>
 
-Get your documentation site up and running in minutes.
+## Overview
 
-<Card
-  title="Start here"
-  icon="rocket"
-  href="/quickstart"
-  horizontal
->
-  Follow our three step quickstart guide.
-</Card>
+NestJS Better Auth is a powerful integration library that brings the full capabilities of [Better Auth](https://www.better-auth.com/) to your NestJS applications. It provides a complete authentication and authorization solution with TypeScript-first design, automatic route protection, and seamless integration with NestJS's dependency injection system.
 
-## Make it yours
-
-Design a docs site that looks great and empowers your users.
-
-<Columns cols={2}>
-  <Card
-    title="Edit locally"
-    icon="pen-to-square"
-    href="/development"
-  >
-    Edit your docs locally and preview them in real time.
+<CardGroup cols={2}>
+  <Card title="Installation" icon="download" href="/installation">
+    Get started with NestJS Better Auth in your project
   </Card>
-  <Card
-    title="Customize your site"
-    icon="palette"
-    href="/essentials/settings"
-  >
-    Customize the design and colors of your site to match your brand.
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Build your first authenticated NestJS app
   </Card>
-    <Card
-    title="Set up navigation"
-    icon="map"
-    href="/essentials/navigation"
-  >
-    Organize your docs to help users find what they need and succeed with your product.
+  <Card title="API Reference" icon="code" href="/api/auth-module">
+    Explore the complete API documentation
   </Card>
-  <Card
-    title="API documentation"
-    icon="terminal"
-    href="/api-reference/introduction"
-  >
-    Auto-generate API documentation from OpenAPI specifications.
+  <Card title="GitHub" icon="github" href="https://github.com/ThallesP/nestjs-better-auth">
+    View source code and contribute
   </Card>
-</Columns>
+</CardGroup>
 
-## Create beautiful pages
+## Key Features
 
-Everything you need to create world-class documentation.
+<CardGroup cols={2}>
+  <Card title="Global Authentication" icon="shield-halved">
+    Automatic route protection with a global guard that can be overridden at the controller or route level
+  </Card>
+  <Card title="Role-Based Access Control" icon="users-gear">
+    Built-in support for system-level and organization-level role checks with dedicated decorators
+  </Card>
+  <Card title="Permission System" icon="key">
+    Fine-grained permission-based access control for both users and organization members
+  </Card>
+  <Card title="Multi-Platform Support" icon="server">
+    Works seamlessly with Express and Fastify adapters
+  </Card>
+  <Card title="WebSocket & GraphQL" icon="bolt">
+    Full authentication support for REST, WebSocket, and GraphQL endpoints
+  </Card>
+  <Card title="Custom Hooks" icon="webhook">
+    Create authentication hooks with full access to NestJS dependency injection
+  </Card>
+  <Card title="TypeScript-First" icon="code">
+    Complete type safety with TypeScript interfaces and type inference
+  </Card>
+  <Card title="Auto Configuration" icon="gears">
+    Automatic body parser and CORS configuration for Better Auth routes
+  </Card>
+</CardGroup>
 
-<Columns cols={2}>
-  <Card
-    title="Write with MDX"
-    icon="pen-fancy"
-    href="/essentials/markdown"
-  >
-    Use MDX to style your docs pages.
-  </Card>
-  <Card
-    title="Code samples"
-    icon="code"
-    href="/essentials/code"
-  >
-    Add sample code to demonstrate how to use your product.
-  </Card>
-  <Card
-    title="Images"
-    icon="image"
-    href="/essentials/images"
-  >
-    Display images and other media.
-  </Card>
-  <Card
-    title="Reusable snippets"
-    icon="recycle"
-    href="/essentials/reusable-snippets"
-  >
-    Write once and reuse across your docs.
-  </Card>
-</Columns>
+## Quick Example
 
-## Need inspiration?
+Here's how simple it is to add authentication to your NestJS application:
 
-<Card
-  title="See complete examples"
-  icon="stars"
-  href="https://mintlify.com/customers"
->
-  Browse our showcase of exceptional documentation sites.
-</Card>
+```typescript main.ts
+import { NestFactory } from "@nestjs/core";
+import { AppModule } from "./app.module";
+
+async function bootstrap() {
+  const app = await NestFactory.create(AppModule, {
+    bodyParser: false, // Required for Better Auth
+  });
+  await app.listen(3000);
+}
+bootstrap();
+```
+
+```typescript app.module.ts
+import { Module } from "@nestjs/common";
+import { AuthModule } from "@thallesp/nestjs-better-auth";
+import { auth } from "./auth";
+
+@Module({
+  imports: [
+    AuthModule.forRoot({
+      auth,
+      bodyParser: {
+        json: { limit: "2mb" },
+        urlencoded: { limit: "2mb", extended: true },
+      },
+    }),
+  ],
+})
+export class AppModule {}
+```
+
+```typescript user.controller.ts
+import { Controller, Get } from "@nestjs/common";
+import { Session, UserSession } from "@thallesp/nestjs-better-auth";
+
+@Controller("users")
+export class UserController {
+  @Get("me")
+  async getProfile(@Session() session: UserSession) {
+    return session.user;
+  }
+}
+```
+
+All routes are automatically protected. Use decorators to allow public access or add role-based restrictions.
+
+## Community & Support
+
+<CardGroup cols={2}>
+  <Card title="GitHub Issues" icon="bug" href="https://github.com/ThallesP/nestjs-better-auth/issues">
+    Report bugs and request features
+  </Card>
+  <Card title="Better Auth Docs" icon="book" href="https://www.better-auth.com/docs">
+    Learn more about Better Auth
+  </Card>
+</CardGroup>

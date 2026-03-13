@@ -1,0 +1,312 @@
+---
+title: System-Level Permissions
+description: Protect routes using fine-grained permission checks with the @UserHasPermission() decorator
+---
+
+The `@UserHasPermission()` decorator provides system-level permission-based access control using Better Auth's [admin plugin access control](https://www.better-auth.com/docs/plugins/admin/access-control).
+
+## Prerequisites
+
+Configure Better Auth with the admin plugin and access control:
+
+```ts title="auth.ts"
+import { betterAuth } from "better-auth";
+import { admin } from "better-auth/plugins/admin";
+import { createAccessControl } from "better-auth/plugins/access";
+
+// Define permission statement (resources and actions)
+const statement = {
+  project: ["create", "share", "update", "delete"],
+  sale: ["create", "read", "update", "delete"],
+} as const;
+
+const ac = createAccessControl(statement);
+
+// Create roles with specific permissions
+const editor = ac.newRole({
+  project: ["create", "update"],
+});
+
+const admin = ac.newRole({
+  project: ["create", "update", "delete"],
+  sale: ["create", "read", "update", "delete"],
+});
+
+export const auth = betterAuth({
+  basePath: "/api/auth",
+  plugins: [
+    admin({
+      ac,
+      roles: {
+        editor,
+        admin,
+      },
+    }),
+  ],
+});
+```
+
+## Basic Usage
+
+Restrict routes based on specific permissions:
+
+```ts title="project.controller.ts"
+import { Controller, Post } from "@nestjs/common";
+import { UserHasPermission } from "@thallesp/nestjs-better-auth";
+
+@Controller("projects")
+export class ProjectController {
+  @UserHasPermission({ permission: { project: ["create", "update"] } })
+  @Post()
+  async createProject() {
+    // Only users with project: ["create", "update"] permissions can access
+    return { message: "Project created" };
+  }
+
+  @UserHasPermission({ permission: { project: ["delete"] } })
+  @Post(":id/delete")
+  async deleteProject() {
+    // Only users with project: ["delete"] permission can access
+    return { message: "Project deleted" };
+  }
+}
+```
+
+## Single vs Multiple Permissions
+
+Use `permission` for a single resource or `permissions` for multiple resources:
+
+```ts title="project.controller.ts"
+import { Controller, Post } from "@nestjs/common";
+import { UserHasPermission } from "@thallesp/nestjs-better-auth";
+
+@Controller("projects")
+export class ProjectController {
+  // Single permission check
+  @UserHasPermission({ permission: { project: ["create"] } })
+  @Post()
+  async createProject() {
+    return { message: "Project created" };
+  }
+
+  // Multiple permissions across resources
+  @UserHasPermission({
+    permissions: { project: ["create"], sale: ["create"] },
+  })
+  @Post("with-sale")
+  async createProjectWithSale() {
+    // User must have BOTH project:create AND sale:create permissions
+    return { message: "Project and sale created" };
+  }
+}
+```
+
+<Warning>
+  When using `permissions` with multiple resources, the user must have ALL specified permissions. This is an AND operation, not OR.
+</Warning>
+
+## Role-Based Permission Checks
+
+Check permissions for a specific role (server-only):
+
+```ts title="project.controller.ts"
+import { Controller, Get } from "@nestjs/common";
+import { UserHasPermission } from "@thallesp/nestjs-better-auth";
+
+@Controller("projects")
+export class ProjectController {
+  @UserHasPermission({
+    role: "editor",
+    permission: { project: ["create", "update"] },
+  })
+  @Get("editor-capabilities")
+  async getEditorCapabilities() {
+    // Check if 'editor' role has these permissions
+    return { capabilities: ["create", "update"] };
+  }
+}
+```
+
+## User-Specific Permission Checks
+
+Check permissions for a specific user (defaults to current user):
+
+```ts title="project.controller.ts"
+import { Controller, Get, Query } from "@nestjs/common";
+import { UserHasPermission, Session, UserSession } from "@thallesp/nestjs-better-auth";
+
+@Controller("projects")
+export class ProjectController {
+  // Check current user's permissions (default)
+  @UserHasPermission({ permission: { project: ["create"] } })
+  @Get()
+  async listProjects(@Session() session: UserSession) {
+    // Current user must have project:create permission
+    return { projects: [] };
+  }
+
+  // Check specific user's permissions
+  @UserHasPermission({
+    userId: "user-123", // Check permissions for specific user
+    permission: { project: ["delete"] },
+  })
+  @Get("user-permissions")
+  async checkUserPermissions() {
+    return { hasPermission: true };
+  }
+}
+```
+
+## Controller-Level Protection
+
+Apply permission requirements to an entire controller:
+
+```ts title="project.controller.ts"
+import { Controller, Get, Post } from "@nestjs/common";
+import { UserHasPermission } from "@thallesp/nestjs-better-auth";
+
+@UserHasPermission({ permission: { project: ["create", "update"] } })
+@Controller("projects")
+export class ProjectController {
+  // All routes require project:create AND project:update permissions
+
+  @Get()
+  async listProjects() {
+    return { projects: [] };
+  }
+
+  @Post()
+  async createProject() {
+    return { message: "Project created" };
+  }
+}
+```
+
+## Complex Permission Scenarios
+
+```ts title="complex.controller.ts"
+import { Controller, Post, Get } from "@nestjs/common";
+import { UserHasPermission } from "@thallesp/nestjs-better-auth";
+
+@Controller("complex")
+export class ComplexController {
+  // Multiple actions on single resource
+  @UserHasPermission({ permission: { project: ["create", "update", "share"] } })
+  @Post("project/publish")
+  async publishProject() {
+    return { message: "Published" };
+  }
+
+  // Multiple resources with different actions
+  @UserHasPermission({
+    permissions: {
+      project: ["create", "update"],
+      sale: ["create"],
+    },
+  })
+  @Post("project-sale")
+  async createProjectAndSale() {
+    return { message: "Created" };
+  }
+
+  // Role-based check
+  @UserHasPermission({
+    role: "admin",
+    permission: { project: ["delete"] },
+  })
+  @Get("admin-can-delete")
+  async checkAdminDeletePermission() {
+    return { canDelete: true };
+  }
+}
+```
+
+## Creating Users with Permissions
+
+Create users with specific roles (which grant permissions):
+
+```ts title="setup.ts"
+import { auth } from "./auth";
+
+// Create a user with 'editor' role
+const editorUser = await auth.api.createUser({
+  body: {
+    name: "Editor User",
+    email: "editor@example.com",
+    password: "secure-password",
+    role: "editor", // Has project: ["create", "update"] permissions
+  },
+});
+
+// Create a user with 'admin' role
+const adminUser = await auth.api.createUser({
+  body: {
+    name: "Admin User",
+    email: "admin@example.com",
+    password: "secure-password",
+    role: "admin", // Has full permissions
+  },
+});
+```
+
+## Permission Validation
+
+The decorator validates permissions against your access control configuration:
+
+```ts
+// ✅ Valid: Actions defined in statement
+@UserHasPermission({ permission: { project: ["create"] } })
+
+// ❌ Invalid: Action not in statement
+@UserHasPermission({ permission: { project: ["read"] } })
+// This will fail if "read" is not in your statement
+
+// ✅ Valid: Multiple actions
+@UserHasPermission({ permission: { project: ["create", "update", "delete"] } })
+
+// ✅ Valid: Multiple resources
+@UserHasPermission({ permissions: { project: ["create"], sale: ["read"] } })
+```
+
+<Warning>
+  **Security Note:** Only use actions defined in your access control statement. Invalid actions will cause permission checks to fail.
+</Warning>
+
+## Response Codes
+
+- **200**: User has all required permissions
+- **401**: User is not authenticated
+- **403**: User is authenticated but lacks one or more required permissions
+
+## Debugging Permission Issues
+
+If permission checks fail unexpectedly, verify:
+
+1. Access control is configured in Better Auth
+2. User has a role assigned with the required permissions
+3. Permission actions match your statement definition
+4. You're using `permission` (singular) for single checks or `permissions` (plural) for multiple
+
+```ts
+// Check user's role in your controller
+import { Session, UserSession } from "@thallesp/nestjs-better-auth";
+
+@Get("debug")
+async debugPermissions(@Session() session: UserSession) {
+  return {
+    userId: session.user.id,
+    userRole: session.user.role, // Check what role the user has
+  };
+}
+```
+
+## Related
+
+<CardGroup cols={2}>
+  <Card title="System Roles" icon="shield-halved" href="/authorization/roles">
+    Use @Roles() for simpler role-based checks
+  </Card>
+  <Card title="Organization Permissions" icon="building-lock" href="/authorization/organization-permissions">
+    Use @MemberHasPermission() for org-scoped permissions
+  </Card>
+</CardGroup>

@@ -1,0 +1,214 @@
+---
+title: AuthService
+description: NestJS service that provides access to the Better Auth instance
+---
+
+## Overview
+
+`AuthService` is an injectable NestJS service that provides access to your Better Auth instance and its API endpoints. It supports TypeScript generics to maintain type safety with Better Auth plugins.
+
+## Type Signature
+
+```typescript
+class AuthService<T extends { api: T["api"] } = Auth> {
+  constructor(
+    @Inject(MODULE_OPTIONS_TOKEN)
+    private readonly options: AuthModuleOptions<T>,
+  ) {}
+
+  get api(): T["api"];
+  get instance(): T;
+}
+```
+
+## Properties
+
+### api
+
+Returns the API endpoints provided by the Better Auth instance.
+
+<ResponseField name="api" type="T['api']">
+  The Better Auth API object containing all available endpoint methods
+</ResponseField>
+
+#### Example
+
+```typescript
+import { Injectable } from '@nestjs/common';
+import { AuthService } from '@better-auth/nestjs';
+
+@Injectable()
+export class UserService {
+  constructor(private readonly authService: AuthService) {}
+
+  async getUserById(userId: string) {
+    // Access Better Auth API methods
+    const user = await this.authService.api.getUser({ userId });
+    return user;
+  }
+
+  async listSessions(userId: string) {
+    const sessions = await this.authService.api.listSessions({ userId });
+    return sessions;
+  }
+}
+```
+
+### instance
+
+Returns the complete Better Auth instance. Use this to access plugin-specific functionality.
+
+<ResponseField name="instance" type="T">
+  The full Better Auth instance including all plugins and configuration
+</ResponseField>
+
+#### Example
+
+```typescript
+import { Injectable } from '@nestjs/common';
+import { AuthService } from '@better-auth/nestjs';
+
+@Injectable()
+export class OrganizationService {
+  constructor(private readonly authService: AuthService) {}
+
+  async createOrganization(name: string, userId: string) {
+    // Access plugin-specific methods via instance
+    const org = await this.authService.instance.api.createOrganization({
+      body: { name, userId },
+    });
+    return org;
+  }
+}
+```
+
+## Usage with TypeScript Generics
+
+For full type safety with Better Auth plugins, use TypeScript generics:
+
+```typescript
+import { Injectable } from '@nestjs/common';
+import { AuthService } from '@better-auth/nestjs';
+import type { auth } from './auth'; // Your Better Auth instance type
+
+@Injectable()
+export class MyService {
+  constructor(
+    private readonly authService: AuthService<typeof auth>,
+  ) {}
+
+  async doSomething() {
+    // Now authService.api has full type information
+    // including all plugin methods
+    const result = await this.authService.api.somePluginMethod();
+  }
+}
+```
+
+## Common Use Cases
+
+### Creating Users
+
+```typescript
+@Injectable()
+export class UserService {
+  constructor(private readonly authService: AuthService) {}
+
+  async createUser(email: string, password: string, name: string) {
+    const user = await this.authService.api.signUpEmail({
+      body: {
+        email,
+        password,
+        name,
+      },
+    });
+    return user;
+  }
+}
+```
+
+### Managing Sessions
+
+```typescript
+@Injectable()
+export class SessionService {
+  constructor(private readonly authService: AuthService) {}
+
+  async revokeSession(sessionToken: string) {
+    await this.authService.api.revokeSession({
+      body: { sessionToken },
+    });
+  }
+
+  async revokeAllUserSessions(userId: string) {
+    await this.authService.api.revokeUserSessions({
+      body: { userId },
+    });
+  }
+}
+```
+
+### Working with Organizations
+
+```typescript
+@Injectable()
+export class OrganizationService {
+  constructor(private readonly authService: AuthService) {}
+
+  async addMember(orgId: string, userId: string, role: string) {
+    await this.authService.api.addMember({
+      body: {
+        organizationId: orgId,
+        userId,
+        role,
+      },
+    });
+  }
+
+  async removeMember(orgId: string, userId: string) {
+    await this.authService.api.removeMember({
+      body: {
+        organizationId: orgId,
+        userId,
+      },
+    });
+  }
+}
+```
+
+### Access Control
+
+```typescript
+@Injectable()
+export class PermissionService {
+  constructor(private readonly authService: AuthService) {}
+
+  async checkPermission(
+    userId: string,
+    permissions: Record<string, string[]>
+  ) {
+    const result = await this.authService.api.userHasPermission({
+      body: { userId, permissions },
+    });
+    return result.success;
+  }
+}
+```
+
+## Notes
+
+- The service is automatically available after importing `AuthModule`
+- All API methods accept `headers` parameter for authenticated requests
+- Return types depend on your Better Auth configuration and plugins
+- Use generics for full TypeScript support with plugin methods
+
+## Related
+
+<CardGroup cols={2}>
+  <Card title="AuthModule" href="/api/auth-module" icon="cube">
+    Module configuration and setup
+  </Card>
+  <Card title="AuthGuard" href="/api/auth-guard" icon="shield">
+    Route authentication guard
+  </Card>
+</CardGroup>

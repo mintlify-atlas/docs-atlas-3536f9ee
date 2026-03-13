@@ -1,0 +1,332 @@
+---
+title: '@OptionalAuth'
+description: Marks a route as having optional authentication
+---
+
+## Overview
+
+`@OptionalAuth()` is a decorator that allows routes to proceed with or without authentication. When applied, the `AuthGuard` permits the request even if no session is present, but still validates and provides the session if authentication is available.
+
+## Type Signature
+
+```typescript
+export const OptionalAuth = (): CustomDecorator<string> =>
+  SetMetadata("OPTIONAL", true);
+```
+
+## Usage
+
+### Basic Usage
+
+```typescript
+import { Controller, Get } from '@nestjs/common';
+import { OptionalAuth, Session } from '@better-auth/nestjs';
+import type { UserSession } from '@better-auth/nestjs';
+
+@Controller('posts')
+export class PostsController {
+  @OptionalAuth()
+  @Get()
+  listPosts(@Session() session: UserSession | null) {
+    if (session) {
+      // User is authenticated - return personalized content
+      return this.postsService.getPersonalizedPosts(session.user.id);
+    }
+    // User is not authenticated - return public content
+    return this.postsService.getPublicPosts();
+  }
+}
+```
+
+### On a Controller
+
+```typescript
+import { Controller, Get } from '@nestjs/common';
+import { OptionalAuth, Session } from '@better-auth/nestjs';
+
+@OptionalAuth()
+@Controller('feed')
+export class FeedController {
+  @Get()
+  getFeed(@Session() session: UserSession | null) {
+    return session 
+      ? this.feedService.getPersonalizedFeed(session.user.id)
+      : this.feedService.getDefaultFeed();
+  }
+
+  @Get('trending')
+  getTrending(@Session() session: UserSession | null) {
+    return this.feedService.getTrending(session?.user.id);
+  }
+}
+```
+
+## Examples
+
+### Personalized vs Public Content
+
+```typescript
+@Controller('articles')
+export class ArticlesController {
+  @OptionalAuth()
+  @Get(':id')
+  async getArticle(
+    @Param('id') id: string,
+    @Session() session: UserSession | null,
+  ) {
+    const article = await this.articlesService.findOne(id);
+
+    if (session) {
+      // Track reading history for authenticated users
+      await this.historyService.trackView(session.user.id, id);
+      
+      // Include user-specific metadata
+      return {
+        ...article,
+        isBookmarked: await this.bookmarksService.isBookmarked(
+          session.user.id,
+          id,
+        ),
+        readingProgress: await this.progressService.getProgress(
+          session.user.id,
+          id,
+        ),
+      };
+    }
+
+    // Return basic article for anonymous users
+    return article;
+  }
+}
+```
+
+### Premium Features
+
+```typescript
+@Controller('content')
+export class ContentController {
+  @OptionalAuth()
+  @Get('videos/:id')
+  async getVideo(
+    @Param('id') id: string,
+    @Session() session: UserSession | null,
+  ) {
+    const video = await this.videosService.findOne(id);
+
+    if (!session) {
+      // Anonymous users get standard quality
+      return {
+        ...video,
+        quality: 'standard',
+        downloadable: false,
+      };
+    }
+
+    const isPremium = await this.subscriptionService.isPremium(
+      session.user.id,
+    );
+
+    if (isPremium) {
+      // Premium users get HD quality and downloads
+      return {
+        ...video,
+        quality: 'hd',
+        downloadable: true,
+      };
+    }
+
+    // Regular authenticated users get standard quality
+    return {
+      ...video,
+      quality: 'standard',
+      downloadable: false,
+    };
+  }
+}
+```
+
+### Analytics and Tracking
+
+```typescript
+@Controller('analytics')
+export class AnalyticsController {
+  @OptionalAuth()
+  @Post('events')
+  trackEvent(
+    @Body() event: EventDto,
+    @Session() session: UserSession | null,
+  ) {
+    return this.analyticsService.track({
+      ...event,
+      userId: session?.user.id, // Optional user ID
+      timestamp: new Date(),
+    });
+  }
+}
+```
+
+### Social Features
+
+```typescript
+@Controller('comments')
+export class CommentsController {
+  @OptionalAuth()
+  @Get('post/:postId')
+  async getComments(
+    @Param('postId') postId: string,
+    @Session() session: UserSession | null,
+  ) {
+    const comments = await this.commentsService.findByPost(postId);
+
+    if (session) {
+      // Add voting status for authenticated users
+      return Promise.all(
+        comments.map(async (comment) => ({
+          ...comment,
+          userVote: await this.votesService.getUserVote(
+            session.user.id,
+            comment.id,
+          ),
+        })),
+      );
+    }
+
+    // Return plain comments for anonymous users
+    return comments;
+  }
+}
+```
+
+## Behavior
+
+When `@OptionalAuth()` is applied:
+
+1. **AuthGuard validates session if present** - Authentication is attempted
+2. **Proceeds without session** - If no session exists, the route handler still executes
+3. **Session is typed as nullable** - `UserSession | null`
+4. **All authorization decorators are ignored** - Roles and permissions are not checked
+
+### Type Safety
+
+Always type the session parameter as nullable:
+
+```typescript
+@OptionalAuth()
+@Get('data')
+getData(@Session() session: UserSession | null) {
+  // TypeScript enforces null checking
+  if (session) {
+    const userId: string = session.user.id; // Safe
+  }
+  
+  // const userId = session.user.id; // Error: Object is possibly 'null'
+}
+```
+
+## When to Use
+
+Use `@OptionalAuth()` when:
+
+- **Content can be personalized** if user is logged in
+- **Features differ** between authenticated and anonymous users
+- **Analytics require** optional user identification
+- **Social features** benefit from authentication but don't require it
+- **Preview modes** allow limited access without authentication
+
+## Comparison with @AllowAnonymous
+
+| Feature | @OptionalAuth | @AllowAnonymous |
+|---------|--------------|----------------|
+| Requires auth | No | No |
+| Validates session | Yes (if present) | No (skips check) |
+| Session available | Yes (if authenticated) | No (always null) |
+| Checks roles/permissions | No | No |
+| Use case | Personalized optional features | Truly public routes |
+
+## Alternative Name
+
+`@Optional()` is an alias for `@OptionalAuth()`:
+
+```typescript
+import { Optional } from '@better-auth/nestjs';
+
+@Optional() // Same as @OptionalAuth()
+@Get('feed')
+getFeed(@Session() session: UserSession | null) {
+  return session ? 'personalized' : 'public';
+}
+```
+
+<Note>
+`@Optional()` is deprecated in favor of `@OptionalAuth()` for better clarity.
+</Note>
+
+## Common Patterns
+
+### Default Values with Optional Chaining
+
+```typescript
+@OptionalAuth()
+@Get('settings')
+getSettings(@Session() session: UserSession | null) {
+  return {
+    theme: session?.user.preferences?.theme ?? 'light',
+    language: session?.user.preferences?.language ?? 'en',
+  };
+}
+```
+
+### Conditional Service Methods
+
+```typescript
+@OptionalAuth()
+@Get('recommendations')
+getRecommendations(@Session() session: UserSession | null) {
+  return session
+    ? this.recommendationsService.getPersonalized(session.user.id)
+    : this.recommendationsService.getGeneral();
+}
+```
+
+### Partial Data for Anonymous Users
+
+```typescript
+@OptionalAuth()
+@Get('profile/:username')
+async getProfile(
+  @Param('username') username: string,
+  @Session() session: UserSession | null,
+) {
+  const profile = await this.usersService.findByUsername(username);
+  
+  if (!session) {
+    // Remove sensitive data for anonymous users
+    const { email, phoneNumber, ...publicProfile } = profile;
+    return publicProfile;
+  }
+  
+  // Return full profile for authenticated users
+  return profile;
+}
+```
+
+## Notes
+
+- Method-level decorator overrides controller-level decorators
+- Authorization decorators (`@Roles`, `@UserHasPermission`) are ignored
+- Session validation still occurs if authentication is present
+- Invalid sessions are rejected (same as protected routes)
+
+## Related
+
+<CardGroup cols={3}>
+  <Card title="@AllowAnonymous" href="/api/decorators/allow-anonymous" icon="lock-open">
+    Public access decorator
+  </Card>
+  <Card title="@Session" href="/api/decorators/session" icon="user">
+    Extract session data
+  </Card>
+  <Card title="AuthGuard" href="/api/auth-guard" icon="shield">
+    Authentication guard
+  </Card>
+</CardGroup>

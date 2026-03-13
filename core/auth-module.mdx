@@ -1,0 +1,280 @@
+---
+title: 'AuthModule'
+description: 'Configure and initialize NestJS Better Auth integration'
+icon: 'cube'
+---
+
+The `AuthModule` is the core module that integrates Better Auth with your NestJS application. It sets up authentication middleware, registers the global AuthGuard, and provides the AuthService.
+
+## Overview
+
+The AuthModule handles:
+
+- Mounting Better Auth API routes
+- Configuring body parsers for authentication endpoints
+- Setting up CORS for trusted origins
+- Registering the global AuthGuard for route protection
+- Processing authentication hooks
+- Managing global prefix exclusions for auth routes
+
+## Basic Setup
+
+### Using forRoot()
+
+The simplest way to configure the AuthModule is with the synchronous `forRoot()` method:
+
+```typescript title="app.module.ts"
+import { Module } from '@nestjs/common';
+import { AuthModule } from '@thallesp/nestjs-better-auth';
+import { auth } from './auth';
+
+@Module({
+  imports: [
+    AuthModule.forRoot({
+      auth,
+    }),
+  ],
+})
+export class AppModule {}
+```
+
+### Using forRootAsync()
+
+For dynamic configuration with dependency injection, use `forRootAsync()`:
+
+```typescript title="app.module.ts"
+import { Module } from '@nestjs/common';
+import { ConfigModule, ConfigService } from '@nestjs/config';
+import { AuthModule } from '@thallesp/nestjs-better-auth';
+
+@Module({
+  imports: [
+    ConfigModule.forRoot(),
+    AuthModule.forRootAsync({
+      imports: [ConfigModule],
+      inject: [ConfigService],
+      useFactory: async (config: ConfigService) => {
+        const auth = await createAuthInstance(config);
+        return {
+          auth,
+          bodyParser: {
+            json: { limit: config.get('BODY_LIMIT') },
+          },
+        };
+      },
+    }),
+  ],
+})
+export class AppModule {}
+```
+
+## Method Signatures
+
+### forRoot()
+
+```typescript
+static forRoot(options: {
+  auth: Auth;
+  disableTrustedOriginsCors?: boolean;
+  bodyParser?: AuthModuleBodyParserOptions;
+  disableBodyParser?: boolean; // deprecated
+  enableRawBodyParser?: boolean; // deprecated
+  middleware?: (req: Request, res: Response, next: NextFunction) => void;
+}): DynamicModule
+```
+
+**Parameters:**
+
+- `auth` - Your Better Auth instance (required)
+- `disableTrustedOriginsCors` - Disable automatic CORS for trusted origins (default: `false`)
+- `bodyParser` - Configure body parser options
+- `middleware` - Custom middleware to wrap the Better Auth handler
+
+### forRootAsync()
+
+```typescript
+static forRootAsync(options: {
+  imports?: any[];
+  inject?: any[];
+  useFactory: (...args: any[]) => Promise<AuthModuleOptions> | AuthModuleOptions;
+  disableGlobalAuthGuard?: boolean;
+  disableControllers?: boolean;
+}): DynamicModule
+```
+
+**Parameters:**
+
+- `imports` - Modules to import for dependency injection
+- `inject` - Providers to inject into the factory function
+- `useFactory` - Factory function that returns AuthModuleOptions
+- `disableGlobalAuthGuard` - Skip global AuthGuard registration (default: `false`)
+- `disableControllers` - Skip controller registration (default: `false`)
+
+## Configuration Options
+
+### Body Parser Configuration
+
+The module re-adds body parsers after disabling NestJS's built-in parser:
+
+```typescript
+AuthModule.forRoot({
+  auth,
+  bodyParser: {
+    json: {
+      enabled: true,
+      limit: '2mb',
+      // Other body-parser options
+    },
+    urlencoded: {
+      enabled: true,
+      extended: true,
+      limit: '2mb',
+    },
+    rawBody: true, // Enables req.rawBody for webhook verification
+  },
+})
+```
+
+<Note>
+  When using Fastify with `extended: true`, install the optional `qs` peer dependency for nested form parsing.
+</Note>
+
+### CORS Configuration
+
+If you configure `trustedOrigins` in Better Auth, the module automatically applies CORS headers:
+
+```typescript title="auth.ts"
+export const auth = betterAuth({
+  trustedOrigins: ['http://localhost:3000', 'https://app.example.com'],
+  // ... other options
+});
+```
+
+```typescript title="app.module.ts"
+AuthModule.forRoot({
+  auth,
+  // CORS is automatically applied for trustedOrigins
+  // Set disableTrustedOriginsCors: true to manage CORS manually
+})
+```
+
+<Warning>
+  On Fastify, function-based `trustedOrigins` are not supported. Use an array of strings or manage CORS manually with `disableTrustedOriginsCors: true`.
+</Warning>
+
+### Custom Middleware
+
+Wrap the Better Auth handler with custom middleware for request context management:
+
+```typescript
+import { RequestContext } from '@mikro-orm/core';
+
+AuthModule.forRoot({
+  auth,
+  middleware: (req, res, next) => {
+    // Create request context before Better Auth processes the request
+    RequestContext.create(orm.em, next);
+  },
+})
+```
+
+The middleware receives Express-style parameters where `next` invokes the Better Auth handler.
+
+### Advanced Options
+
+#### Disable Global AuthGuard
+
+By default, AuthModule registers a global AuthGuard. To manage guards manually:
+
+```typescript
+AuthModule.forRootAsync({
+  // ... factory config
+  disableGlobalAuthGuard: true,
+})
+```
+
+Then apply guards manually:
+
+```typescript
+import { UseGuards } from '@nestjs/common';
+import { AuthGuard } from '@thallesp/nestjs-better-auth';
+
+@Controller('users')
+@UseGuards(AuthGuard)
+export class UserController {}
+```
+
+#### Disable Controllers
+
+To handle routes manually without the module's middleware:
+
+```typescript
+AuthModule.forRootAsync({
+  // ... factory config
+  disableControllers: true,
+})
+```
+
+## How It Works
+
+### Middleware Setup
+
+The AuthModule's `configure()` method:
+
+1. Normalizes the Better Auth base path (default: `/api/auth`)
+2. Excludes the base path from NestJS's global prefix
+3. Configures body parsers for non-auth routes
+4. Sets up CORS for trusted origins (if configured)
+5. Mounts the Better Auth handler using `toNodeHandler()`
+
+### Hook Registration
+
+If you configure `hooks: {}` in Better Auth, the module automatically:
+
+1. Discovers all providers decorated with `@Hook()`
+2. Scans methods decorated with `@BeforeHook()` or `@AfterHook()`
+3. Registers them with Better Auth's hook system
+4. Enables dependency injection in your hook handlers
+
+See the [Hooks documentation](/advanced/hooks) for more details.
+
+### Global Prefix Exclusion
+
+The module automatically excludes Better Auth routes from your NestJS global prefix:
+
+```typescript
+// If your app has globalPrefix: 'api'
+app.setGlobalPrefix('api');
+
+// Better Auth routes are still accessible at:
+// /api/auth/* (not /api/api/auth/*)
+```
+
+## Source Reference
+
+The AuthModule implementation can be found at:
+
+**Source:** `/workspace/source/src/auth-module.ts:58-323`
+
+Key methods:
+- `forRoot()` - `/workspace/source/src/auth-module.ts:282-322`
+- `forRootAsync()` - `/workspace/source/src/auth-module.ts:256-280`
+- `configure()` - `/workspace/source/src/auth-module.ts:125-227`
+- `onModuleInit()` - `/workspace/source/src/auth-module.ts:96-123`
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="AuthGuard" icon="shield-halved" href="/core/auth-guard">
+    Learn how the global guard protects your routes
+  </Card>
+  <Card title="AuthService" icon="code" href="/core/auth-service">
+    Access Better Auth API methods in your controllers
+  </Card>
+  <Card title="Session Management" icon="user-lock" href="/core/session-management">
+    Understand how sessions are validated and attached
+  </Card>
+  <Card title="Decorators" icon="at" href="/api/decorators/session">
+    Explore available decorators for authentication
+  </Card>
+</CardGroup>

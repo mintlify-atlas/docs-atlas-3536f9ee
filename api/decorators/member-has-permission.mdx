@@ -1,0 +1,397 @@
+---
+title: '@MemberHasPermission'
+description: Specifies organization member permissions required to access a route or controller
+---
+
+## Overview
+
+`@MemberHasPermission()` is a decorator that restricts access based on organization member permissions using Better Auth's organization plugin access control. It requires an active organization and checks permissions within that organization's context.
+
+## Type Signature
+
+```typescript
+export const MemberHasPermission = (
+  options: MemberHasPermissionOptions,
+): CustomDecorator => { /* ... */ }
+```
+
+## Parameters
+
+<ParamField path="options" type="MemberHasPermissionOptions" required>
+  Permission check configuration
+  
+  <Expandable title="properties">
+    <ParamField path="permissions" type="PermissionCheck" required>
+      The permissions to check. Must match the structure in your organization access control.
+      
+      Format: `{ resourceName: ["action1", "action2"] }`
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+## Usage
+
+### Single Resource Permission
+
+```typescript
+import { Controller, Post } from '@nestjs/common';
+import { MemberHasPermission } from '@better-auth/nestjs';
+
+@Controller('projects')
+export class ProjectsController {
+  @MemberHasPermission({ permissions: { project: ["create"] } })
+  @Post()
+  createProject() {
+    return 'Member can create projects in this organization';
+  }
+}
+```
+
+### Multiple Actions
+
+```typescript
+@Controller('projects')
+export class ProjectsController {
+  @MemberHasPermission({ permissions: { project: ["create", "update"] } })
+  @Post()
+  createProject() {
+    return 'Member can both create and update projects';
+  }
+}
+```
+
+### Multiple Resources
+
+```typescript
+@Controller('invoices')
+export class InvoicesController {
+  @MemberHasPermission({ 
+    permissions: { 
+      invoice: ["create", "approve"],
+      payment: ["process"]
+    } 
+  })
+  @Post('approve')
+  approveInvoice() {
+    return 'Member can create/approve invoices and process payments';
+  }
+}
+```
+
+## Examples
+
+### Project Management
+
+```typescript
+@Controller('organization/projects')
+export class OrgProjectsController {
+  @Get()
+  listProjects(@Session() session: UserSession) {
+    // No permission decorator - all org members can list
+    const orgId = session.session.activeOrganizationId!;
+    return this.projectsService.findByOrganization(orgId);
+  }
+
+  @MemberHasPermission({ permissions: { project: ["create"] } })
+  @Post()
+  createProject(
+    @Session() session: UserSession,
+    @Body() dto: CreateProjectDto,
+  ) {
+    const orgId = session.session.activeOrganizationId!;
+    return this.projectsService.create(orgId, dto);
+  }
+
+  @MemberHasPermission({ permissions: { project: ["update"] } })
+  @Patch(':id')
+  updateProject(
+    @Param('id') id: string,
+    @Body() dto: UpdateProjectDto,
+  ) {
+    return this.projectsService.update(id, dto);
+  }
+
+  @MemberHasPermission({ permissions: { project: ["delete"] } })
+  @Delete(':id')
+  deleteProject(@Param('id') id: string) {
+    return this.projectsService.remove(id);
+  }
+}
+```
+
+### Financial Operations
+
+```typescript
+@Controller('organization/finances')
+export class FinancesController {
+  @MemberHasPermission({ permissions: { invoice: ["view"] } })
+  @Get('invoices')
+  listInvoices(@Session() session: UserSession) {
+    const orgId = session.session.activeOrganizationId!;
+    return this.invoicesService.findByOrganization(orgId);
+  }
+
+  @MemberHasPermission({ permissions: { invoice: ["create"] } })
+  @Post('invoices')
+  createInvoice(@Body() dto: CreateInvoiceDto) {
+    return this.invoicesService.create(dto);
+  }
+
+  @MemberHasPermission({ 
+    permissions: { 
+      invoice: ["approve"],
+      payment: ["process"]
+    } 
+  })
+  @Post('invoices/:id/approve')
+  approveInvoice(@Param('id') id: string) {
+    return this.invoicesService.approve(id);
+  }
+}
+```
+
+### Team Management
+
+```typescript
+@Controller('organization/teams')
+export class TeamsController {
+  @MemberHasPermission({ permissions: { team: ["create"] } })
+  @Post()
+  createTeam(@Body() dto: CreateTeamDto) {
+    return this.teamsService.create(dto);
+  }
+
+  @MemberHasPermission({ permissions: { team: ["manage"] } })
+  @Post(':id/members')
+  addMember(
+    @Param('id') teamId: string,
+    @Body() dto: AddMemberDto,
+  ) {
+    return this.teamsService.addMember(teamId, dto);
+  }
+
+  @MemberHasPermission({ 
+    permissions: { 
+      team: ["manage"],
+      member: ["assign"]
+    } 
+  })
+  @Patch(':id/members/:memberId')
+  updateMemberRole(
+    @Param('id') teamId: string,
+    @Param('memberId') memberId: string,
+    @Body() dto: UpdateRoleDto,
+  ) {
+    return this.teamsService.updateMemberRole(teamId, memberId, dto);
+  }
+}
+```
+
+### Content Publishing
+
+```typescript
+@Controller('organization/content')
+export class ContentController {
+  @MemberHasPermission({ permissions: { content: ["create"] } })
+  @Post()
+  createContent(@Body() dto: CreateContentDto) {
+    return this.contentService.create(dto);
+  }
+
+  @MemberHasPermission({ permissions: { content: ["edit"] } })
+  @Patch(':id')
+  editContent(
+    @Param('id') id: string,
+    @Body() dto: UpdateContentDto,
+  ) {
+    return this.contentService.update(id, dto);
+  }
+
+  @MemberHasPermission({ permissions: { content: ["publish"] } })
+  @Post(':id/publish')
+  publishContent(@Param('id') id: string) {
+    return this.contentService.publish(id);
+  }
+
+  @MemberHasPermission({ 
+    permissions: { 
+      content: ["delete"],
+      audit: ["log"]
+    } 
+  })
+  @Delete(':id')
+  deleteContent(@Param('id') id: string) {
+    return this.contentService.delete(id);
+  }
+}
+```
+
+## Permission Check Logic
+
+The decorator uses Better Auth's organization plugin `hasPermission` API:
+
+```typescript
+const result = await authApi.hasPermission({
+  body: {
+    permissions: { project: ["create", "update"] },
+  },
+  headers,
+});
+
+if (result?.success) {
+  // Permission granted
+} else {
+  // Permission denied
+}
+```
+
+## Requirements
+
+For `@MemberHasPermission()` to work:
+
+1. **User must be authenticated**
+2. **Active organization required** - `session.session.activeOrganizationId` must be set
+3. **User must be a member** of the active organization
+4. **Member must have the required permissions** based on their role in the organization
+
+If any condition fails, a `ForbiddenException` is thrown.
+
+## Setup Requirements
+
+1. **Configure organization plugin with access control**:
+
+```typescript
+import { betterAuth } from 'better-auth';
+import { organization } from 'better-auth/plugins';
+
+export const auth = betterAuth({
+  database: /* ... */,
+  plugins: [
+    organization({
+      ac: {
+        roles: {
+          owner: {
+            permissions: {
+              project: ["create", "read", "update", "delete"],
+              invoice: ["create", "approve", "view"],
+              team: ["create", "manage"],
+            },
+          },
+          admin: {
+            permissions: {
+              project: ["create", "read", "update"],
+              invoice: ["create", "view"],
+              team: ["create"],
+            },
+          },
+          member: {
+            permissions: {
+              project: ["read"],
+              invoice: ["view"],
+            },
+          },
+        },
+      },
+    }),
+  ],
+});
+```
+
+2. **Set active organization** (client-side):
+
+```typescript
+await authClient.organization.setActive({
+  organizationId: 'org-id',
+});
+```
+
+3. **Assign roles to members**:
+
+```typescript
+await authService.api.addMember({
+  body: {
+    organizationId: 'org-id',
+    userId: 'user-id',
+    role: 'admin',
+  },
+});
+```
+
+## Error Handling
+
+When permission check fails:
+
+```typescript
+// No active organization
+if (!session.session.activeOrganizationId) {
+  throw new ForbiddenException();
+}
+
+// Permission check failed
+throw new ForbiddenException({
+  code: 'FORBIDDEN',
+  message: 'Insufficient permissions',
+});
+```
+
+## Validation
+
+The decorator validates that `permissions` is provided:
+
+```typescript
+// ❌ Invalid - missing permissions
+@MemberHasPermission({})
+
+// ✅ Valid
+@MemberHasPermission({ permissions: { project: ["create"] } })
+```
+
+## Comparison with Other Decorators
+
+| Decorator | Checks | Scope | Active Org Required |
+|-----------|--------|-------|--------------------|
+| `@MemberHasPermission` | Member permissions | Organization-level | Yes |
+| `@UserHasPermission` | User permissions | User-level | No |
+| `@OrgRoles` | Member role | Organization-level | Yes |
+| `@Roles` | User role | User-level | No |
+
+## When to Use
+
+Use `@MemberHasPermission()` for:
+
+- **Organization-scoped resources** - Projects, teams, content within an org
+- **Fine-grained org permissions** - Beyond simple role checks
+- **Multi-tenant applications** - Per-organization access control
+- **Complex org workflows** - Approval processes, publishing
+
+Use [`@UserHasPermission()`](/api/decorators/user-has-permission) for:
+
+- **User-level permissions** - Not tied to organizations
+- **Global features** - Cross-organization permissions
+
+Use [`@OrgRoles()`](/api/decorators/org-roles) for:
+
+- **Simple role checks** - Owner, admin, member
+- **Coarse-grained access** - When permissions aren't needed
+
+## Notes
+
+- Requires Better Auth organization plugin with access control
+- Requires active organization in session
+- Permissions are checked against member's role in the active organization
+- Method-level decorator overrides controller-level
+- Can be combined with `@OrgRoles()` for additional validation
+
+## Related
+
+<CardGroup cols={3}>
+  <Card title="@UserHasPermission" href="/api/decorators/user-has-permission" icon="key">
+    User permission checks
+  </Card>
+  <Card title="@OrgRoles" href="/api/decorators/org-roles" icon="users">
+    Organization role checks
+  </Card>
+  <Card title="PermissionCheck" href="/api/types/permission-check" icon="circle-info">
+    Permission type definition
+  </Card>
+</CardGroup>

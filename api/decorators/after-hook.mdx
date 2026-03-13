@@ -1,0 +1,432 @@
+---
+title: '@AfterHook'
+description: Registers a method to be executed after a specific auth route is processed
+---
+
+## Overview
+
+`@AfterHook()` is a method decorator that registers a function to execute **after** a Better Auth route is processed successfully. It's useful for notifications, analytics, logging, and triggering downstream actions.
+
+## Type Signature
+
+```typescript
+export const AfterHook = (path?: `/${string}`): CustomDecorator<symbol> =>
+  SetMetadata(AFTER_HOOK_KEY, path);
+```
+
+## Parameters
+
+<ParamField path="path" type="`/${string}` | undefined">
+  The auth route path to hook into (must start with '/'). If omitted, the hook runs for **all** auth routes.
+  
+  Examples: `/sign-in/email`, `/sign-up/email`, `/verify-email`
+</ParamField>
+
+## Usage
+
+### Specific Route
+
+```typescript
+import { Injectable } from '@nestjs/common';
+import { Hook, AfterHook } from '@better-auth/nestjs';
+import type { AuthHookContext } from '@better-auth/nestjs';
+
+@Hook()
+@Injectable()
+export class AuthHooks {
+  @AfterHook('/sign-in/email')
+  async afterSignIn(ctx: AuthHookContext) {
+    console.log('User signed in:', ctx.body.email);
+  }
+}
+```
+
+### All Routes
+
+```typescript
+@Hook()
+@Injectable()
+export class AuthHooks {
+  @AfterHook() // No path = all routes
+  async logAllResponses(ctx: AuthHookContext) {
+    console.log('Auth completed:', ctx.path);
+  }
+}
+```
+
+### Multiple Hooks
+
+```typescript
+@Hook()
+@Injectable()
+export class AuthHooks {
+  @AfterHook('/sign-in/email')
+  async afterEmailSignIn(ctx: AuthHookContext) {
+    console.log('Email sign in completed');
+  }
+
+  @AfterHook('/sign-up/email')
+  async afterSignUp(ctx: AuthHookContext) {
+    console.log('Sign up completed');
+  }
+
+  @AfterHook('/verify-email')
+  async afterVerifyEmail(ctx: AuthHookContext) {
+    console.log('Email verified');
+  }
+}
+```
+
+## Examples
+
+### Send Welcome Email
+
+```typescript
+import { Hook, AfterHook } from '@better-auth/nestjs';
+
+@Hook()
+@Injectable()
+export class NotificationHooks {
+  constructor(private emailService: EmailService) {}
+
+  @AfterHook('/sign-up/email')
+  async sendWelcomeEmail(ctx: AuthHookContext) {
+    const { email, name } = ctx.body;
+    
+    await this.emailService.send({
+      to: email,
+      subject: 'Welcome to our platform!',
+      template: 'welcome',
+      data: { name },
+    });
+  }
+}
+```
+
+### Track Analytics
+
+```typescript
+@Hook()
+@Injectable()
+export class AnalyticsHooks {
+  constructor(private analytics: AnalyticsService) {}
+
+  @AfterHook('/sign-up/email')
+  async trackSignUp(ctx: AuthHookContext) {
+    await this.analytics.track('user_signed_up', {
+      email: ctx.body.email,
+      method: 'email',
+      timestamp: new Date(),
+      source: ctx.body.metadata?.source,
+    });
+  }
+
+  @AfterHook('/sign-in/email')
+  async trackSignIn(ctx: AuthHookContext) {
+    await this.analytics.track('user_signed_in', {
+      email: ctx.body.email,
+      timestamp: new Date(),
+    });
+  }
+}
+```
+
+### Initialize User Profile
+
+```typescript
+@Hook()
+@Injectable()
+export class OnboardingHooks {
+  constructor(
+    private userService: UserService,
+    private profileService: ProfileService,
+  ) {}
+
+  @AfterHook('/sign-up/email')
+  async initializeUser(ctx: AuthHookContext) {
+    const { email, name } = ctx.body;
+    
+    // Create user profile
+    await this.profileService.create({
+      email,
+      name,
+      preferences: {
+        theme: 'light',
+        language: 'en',
+      },
+    });
+    
+    // Send to onboarding flow
+    await this.userService.startOnboarding(email);
+  }
+}
+```
+
+### Sync to External Services
+
+```typescript
+@Hook()
+@Injectable()
+export class SyncHooks {
+  constructor(
+    private crmService: CRMService,
+    private slackService: SlackService,
+  ) {}
+
+  @AfterHook('/sign-up/email')
+  async syncNewUser(ctx: AuthHookContext) {
+    const { email, name } = ctx.body;
+    
+    // Add to CRM
+    await this.crmService.createContact({
+      email,
+      name,
+      source: 'web_signup',
+    });
+    
+    // Notify team on Slack
+    await this.slackService.notify(
+      `New user signed up: ${name} (${email})`
+    );
+  }
+}
+```
+
+### Send Notifications
+
+```typescript
+@Hook()
+@Injectable()
+export class NotificationHooks {
+  constructor(private notificationService: NotificationService) {}
+
+  @AfterHook('/sign-in/email')
+  async notifySignIn(ctx: AuthHookContext) {
+    const { email } = ctx.body;
+    
+    await this.notificationService.send({
+      to: email,
+      type: 'sign_in',
+      message: 'New sign in detected',
+      timestamp: new Date(),
+      ipAddress: ctx.request.ip,
+    });
+  }
+
+  @AfterHook('/verify-email')
+  async notifyVerification(ctx: AuthHookContext) {
+    const { email } = ctx.body;
+    
+    await this.notificationService.send({
+      to: email,
+      type: 'email_verified',
+      message: 'Your email has been verified',
+    });
+  }
+}
+```
+
+### Audit Logging
+
+```typescript
+@Hook()
+@Injectable()
+export class AuditHooks {
+  constructor(private auditLog: AuditLogService) {}
+
+  @AfterHook() // All routes
+  async logAuthEvent(ctx: AuthHookContext) {
+    await this.auditLog.create({
+      event: 'auth_completed',
+      path: ctx.path,
+      method: ctx.method,
+      userId: ctx.body.email,
+      ipAddress: ctx.request.ip,
+      userAgent: ctx.headers.get('user-agent'),
+      timestamp: new Date(),
+    });
+  }
+}
+```
+
+### Trigger Workflows
+
+```typescript
+@Hook()
+@Injectable()
+export class WorkflowHooks {
+  constructor(private workflowService: WorkflowService) {}
+
+  @AfterHook('/sign-up/email')
+  async triggerOnboarding(ctx: AuthHookContext) {
+    const { email, name } = ctx.body;
+    
+    // Start automated onboarding workflow
+    await this.workflowService.start('user-onboarding', {
+      email,
+      name,
+      triggers: [
+        { delay: 0, action: 'send_welcome_email' },
+        { delay: 3600, action: 'send_getting_started' },
+        { delay: 86400, action: 'check_first_action' },
+      ],
+    });
+  }
+}
+```
+
+### Update Statistics
+
+```typescript
+@Hook()
+@Injectable()
+export class StatsHooks {
+  constructor(private statsService: StatsService) {}
+
+  @AfterHook('/sign-up/email')
+  async updateSignUpStats(ctx: AuthHookContext) {
+    await this.statsService.increment('total_users');
+    await this.statsService.increment('signups_today');
+    await this.statsService.track('signup_by_hour', new Date().getHours());
+  }
+
+  @AfterHook('/sign-in/email')
+  async updateSignInStats(ctx: AuthHookContext) {
+    await this.statsService.increment('active_users_today');
+    await this.statsService.track('signin_by_hour', new Date().getHours());
+  }
+}
+```
+
+## Hook Context
+
+The `ctx` parameter provides access to:
+
+<ResponseField name="path" type="string">
+  The auth route path (e.g., `/sign-in/email`)
+</ResponseField>
+
+<ResponseField name="method" type="string">
+  HTTP method (e.g., `POST`, `GET`)
+</ResponseField>
+
+<ResponseField name="body" type="Record<string, any>">
+  Request body data
+</ResponseField>
+
+<ResponseField name="headers" type="Headers">
+  Request headers
+</ResponseField>
+
+<ResponseField name="request" type="Request">
+  Full request object
+</ResponseField>
+
+## Execution Order
+
+1. Before hooks execute (see `@BeforeHook`)
+2. **Better Auth handler** processes the request
+3. **Global after hooks** (no path specified)
+4. **Route-specific after hooks** (matching path)
+
+## Error Handling
+
+After hooks run **after** the auth operation completes. Throwing errors in after hooks:
+
+- **Does not** prevent the auth operation (already completed)
+- Should be caught and logged to avoid breaking the response
+
+```typescript
+@AfterHook('/sign-up/email')
+async sendEmail(ctx: AuthHookContext) {
+  try {
+    await this.emailService.send(ctx.body.email);
+  } catch (error) {
+    // Log error but don't throw
+    this.logger.error('Failed to send email:', error);
+    // User signup still succeeded
+  }
+}
+```
+
+## Common Auth Paths
+
+- `/sign-in/email` - Email/password sign in
+- `/sign-up/email` - Email/password sign up
+- `/sign-in/social` - Social provider sign in
+- `/verify-email` - Email verification
+- `/reset-password` - Password reset request
+- `/update-password` - Password update
+- `/sign-out` - Sign out
+
+## Requirements
+
+- Must be used in a class decorated with `@Hook()`
+- Class must be an `@Injectable()` provider
+- Better Auth must have `hooks: {}` configured
+
+## Best Practices
+
+### Handle Errors Gracefully
+
+```typescript
+@AfterHook('/sign-up/email')
+async afterSignUp(ctx: AuthHookContext) {
+  try {
+    await this.emailService.sendWelcome(ctx.body.email);
+  } catch (error) {
+    this.logger.error('Failed to send welcome email:', error);
+    // Don't throw - user signup already succeeded
+  }
+}
+```
+
+### Use Async Background Jobs
+
+```typescript
+@AfterHook('/sign-up/email')
+async queueOnboarding(ctx: AuthHookContext) {
+  // Queue long-running tasks instead of awaiting
+  await this.queueService.add('send-welcome-email', {
+    email: ctx.body.email,
+  });
+  
+  await this.queueService.add('create-profile', {
+    userId: ctx.body.id,
+  });
+}
+```
+
+### Keep Hooks Fast
+
+```typescript
+@AfterHook('/sign-in/email')
+async trackSignIn(ctx: AuthHookContext) {
+  // Fast, non-blocking operations
+  this.analytics.track('signin', { email: ctx.body.email });
+  // Don't await if service supports fire-and-forget
+}
+```
+
+## Notes
+
+- Hooks are async and support `await`
+- Path must start with `/` if provided
+- Omit path to run on all auth routes
+- Errors should be caught to avoid breaking responses
+- Multiple hooks can target the same route
+- Consider using background jobs for slow operations
+
+## Related
+
+<CardGroup cols={3}>
+  <Card title="@BeforeHook" href="/api/decorators/before-hook" icon="arrow-right">
+    Execute before auth routes
+  </Card>
+  <Card title="@Hook" href="/api/decorators/hook" icon="webhook">
+    Mark class as hook provider
+  </Card>
+  <Card title="AuthHookContext" href="/api/types/auth-hook-context" icon="circle-info">
+    Hook context type
+  </Card>
+</CardGroup>

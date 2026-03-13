@@ -1,0 +1,278 @@
+---
+title: Route Protection
+description: Learn how routes are protected by default with the global AuthGuard and how to override protection settings
+---
+
+## Global Protection by Default
+
+NestJS Better Auth automatically protects all routes in your application through a globally registered `AuthGuard`. This "secure by default" approach ensures that no endpoints are accidentally exposed without authentication.
+
+```typescript title="app.module.ts"
+import { Module } from "@nestjs/common";
+import { AuthModule } from "@thallesp/nestjs-better-auth";
+import { auth } from "./auth";
+
+@Module({
+  imports: [
+    AuthModule.forRoot({
+      auth,
+      // AuthGuard is automatically registered globally
+    }),
+  ],
+})
+export class AppModule {}
+```
+
+With this setup, **all routes require authentication by default**. Unauthenticated requests will receive a `401 Unauthorized` response.
+
+## How the AuthGuard Works
+
+The `AuthGuard` is a NestJS `CanActivate` guard that:
+
+1. Extracts the session from request headers using Better Auth's API
+2. Attaches the session to the request object (`req.session` and `req.user`)
+3. Checks for authentication bypass decorators (`@AllowAnonymous()` or `@OptionalAuth()`)
+4. Validates the session exists (unless bypassed)
+5. Enforces role and permission requirements if specified
+
+### Supported Contexts
+
+The guard works across all NestJS execution contexts:
+
+- **HTTP** (REST APIs)
+- **GraphQL** (Queries and Mutations)
+- **WebSocket** (Gateway connections)
+- **RPC** (Microservices)
+
+## Protected Routes Example
+
+By default, all controller routes are protected:
+
+```typescript title="user.controller.ts"
+import { Controller, Get } from "@nestjs/common";
+import { Session, UserSession } from "@thallesp/nestjs-better-auth";
+
+@Controller("users")
+export class UserController {
+  @Get("me")
+  async getProfile(@Session() session: UserSession) {
+    // This route is automatically protected
+    // Only authenticated users can access it
+    return {
+      id: session.user.id,
+      email: session.user.email,
+    };
+  }
+
+  @Get("settings")
+  async getSettings(@Session() session: UserSession) {
+    // This route is also protected by default
+    return { userId: session.user.id };
+  }
+}
+```
+
+## Overriding Protection
+
+You can override the default protection behavior using decorators:
+
+### Allow Anonymous Access
+
+Use `@AllowAnonymous()` to completely bypass authentication:
+
+```typescript title="public.controller.ts"
+import { Controller, Get } from "@nestjs/common";
+import { AllowAnonymous } from "@thallesp/nestjs-better-auth";
+
+@Controller("public")
+export class PublicController {
+  @AllowAnonymous()
+  @Get("health")
+  async healthCheck() {
+    // No authentication required
+    return { status: "ok" };
+  }
+}
+```
+
+### Optional Authentication
+
+Use `@OptionalAuth()` to make authentication optional:
+
+```typescript title="content.controller.ts"
+import { Controller, Get } from "@nestjs/common";
+import { OptionalAuth, Session, UserSession } from "@thallesp/nestjs-better-auth";
+
+@Controller("content")
+export class ContentController {
+  @OptionalAuth()
+  @Get("feed")
+  async getFeed(@Session() session: UserSession | null) {
+    // Works for both authenticated and unauthenticated users
+    if (session) {
+      return { personalized: true, userId: session.user.id };
+    }
+    return { personalized: false };
+  }
+}
+```
+
+## Class-Level Protection
+
+Apply protection overrides to entire controllers:
+
+```typescript title="public.controller.ts"
+import { Controller, Get } from "@nestjs/common";
+import { AllowAnonymous } from "@thallesp/nestjs-better-auth";
+
+@AllowAnonymous() // All routes in this controller are public
+@Controller("public")
+export class PublicController {
+  @Get("about")
+  async about() {
+    return { page: "about" };
+  }
+
+  @Get("contact")
+  async contact() {
+    return { page: "contact" };
+  }
+}
+```
+
+You can also override class-level settings at the method level:
+
+```typescript
+@AllowAnonymous()
+@Controller("api")
+export class ApiController {
+  @Get("public-data")
+  async publicData() {
+    // Public (inherited from class)
+    return { data: [] };
+  }
+
+  @Get("protected-data")
+  // Method-level override - this route IS protected
+  // (Remove @AllowAnonymous to require auth)
+  async protectedData(@Session() session: UserSession) {
+    return { data: [], userId: session.user.id };
+  }
+}
+```
+
+<Note>
+  Method-level decorators always take precedence over class-level decorators.
+</Note>
+
+## GraphQL Support
+
+The `AuthGuard` works seamlessly with GraphQL resolvers:
+
+```typescript title="user.resolver.ts"
+import { Query, Resolver } from "@nestjs/graphql";
+import { Session, UserSession, AllowAnonymous } from "@thallesp/nestjs-better-auth";
+
+@Resolver()
+export class UserResolver {
+  @Query(() => User)
+  async me(@Session() session: UserSession) {
+    // Protected by default
+    return session.user;
+  }
+
+  @AllowAnonymous()
+  @Query(() => [User])
+  async publicUsers() {
+    // Public query
+    return [];
+  }
+}
+```
+
+## WebSocket Support
+
+For WebSocket gateways, you must explicitly apply the `AuthGuard`:
+
+```typescript title="chat.gateway.ts"
+import { UseGuards } from "@nestjs/common";
+import { SubscribeMessage, WebSocketGateway } from "@nestjs/websockets";
+import { AuthGuard, AllowAnonymous, Session, UserSession } from "@thallesp/nestjs-better-auth";
+
+@WebSocketGateway({
+  path: "/ws",
+  cors: { origin: "*" },
+})
+@UseGuards(AuthGuard) // Required for WebSocket
+export class ChatGateway {
+  @SubscribeMessage("message")
+  handleMessage(@Session() session: UserSession) {
+    // Protected by default
+    return { userId: session.user.id };
+  }
+
+  @AllowAnonymous()
+  @SubscribeMessage("ping")
+  handlePing() {
+    // Public message handler
+    return { pong: true };
+  }
+}
+```
+
+<Warning>
+  WebSocket gateways require `@UseGuards(AuthGuard)` to be explicitly applied at the gateway or message level. The global guard does not automatically apply to WebSocket connections.
+</Warning>
+
+## Disabling the Global Guard
+
+If you prefer to manually manage authentication guards, disable the global guard:
+
+```typescript title="app.module.ts"
+import { Module } from "@nestjs/common";
+import { AuthModule } from "@thallesp/nestjs-better-auth";
+import { auth } from "./auth";
+
+@Module({
+  imports: [
+    AuthModule.forRoot({
+      auth,
+      disableGlobalAuthGuard: true,
+    }),
+  ],
+})
+export class AppModule {}
+```
+
+Then apply the guard manually:
+
+```typescript title="user.controller.ts"
+import { Controller, Get, UseGuards } from "@nestjs/common";
+import { AuthGuard } from "@thallesp/nestjs-better-auth";
+
+@Controller("users")
+@UseGuards(AuthGuard)
+export class UserController {
+  @Get("me")
+  async getProfile() {
+    return { message: "Protected route" };
+  }
+}
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Decorators" icon="at" href="/authentication/decorators">
+    Learn about all available authentication decorators
+  </Card>
+  <Card title="Anonymous Routes" icon="lock-open" href="/authentication/anonymous-routes">
+    Deep dive into @AllowAnonymous()
+  </Card>
+  <Card title="Optional Auth" icon="shield-halved" href="/authentication/optional-auth">
+    Make authentication optional for routes
+  </Card>
+  <Card title="Role-Based Access" icon="user-shield" href="/authorization/roles">
+    Add role-based authorization
+  </Card>
+</CardGroup>

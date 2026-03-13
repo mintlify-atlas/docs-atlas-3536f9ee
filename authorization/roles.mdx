@@ -1,0 +1,175 @@
+---
+title: System-Level Roles
+description: Protect routes using system-level roles with the @Roles() decorator
+---
+
+The `@Roles()` decorator provides system-level role-based access control by checking the `user.role` field from Better Auth's [admin plugin](https://www.better-auth.com/docs/plugins/admin).
+
+<Warning>
+  **Security Note:** `@Roles()` ONLY checks `user.role` and does NOT check organization member roles. This separation prevents privilege escalation where an organization admin cannot bypass system-level admin protection.
+</Warning>
+
+## Prerequisites
+
+Configure Better Auth with the admin plugin:
+
+```ts title="auth.ts"
+import { betterAuth } from "better-auth";
+import { admin } from "better-auth/plugins/admin";
+
+export const auth = betterAuth({
+  basePath: "/api/auth",
+  plugins: [
+    admin(), // Enable admin plugin for user.role support
+  ],
+});
+```
+
+## Basic Usage
+
+Restrict routes to users with specific system-level roles:
+
+```ts title="admin.controller.ts"
+import { Controller, Get } from "@nestjs/common";
+import { Roles } from "@thallesp/nestjs-better-auth";
+
+@Controller("admin")
+export class AdminController {
+  @Roles(["admin"])
+  @Get("dashboard")
+  async adminDashboard() {
+    // Only users with user.role = 'admin' can access
+    // Organization admins CANNOT access this route
+    return { message: "System admin dashboard" };
+  }
+}
+```
+
+## Multiple Roles
+
+Allow access to users with any of the specified roles:
+
+```ts title="moderator.controller.ts"
+import { Controller, Get } from "@nestjs/common";
+import { Roles, Session, UserSession } from "@thallesp/nestjs-better-auth";
+
+@Controller("moderation")
+export class ModerationController {
+  @Roles(["admin", "moderator"])
+  @Get("reports")
+  async getReports(@Session() session: UserSession) {
+    // Users with user.role = 'admin' OR 'moderator' can access
+    return { reports: [] };
+  }
+}
+```
+
+## Controller-Level Protection
+
+Apply role requirements to an entire controller:
+
+```ts title="admin.controller.ts"
+import { Controller, Get } from "@nestjs/common";
+import { Roles } from "@thallesp/nestjs-better-auth";
+
+@Roles(["admin"])
+@Controller("admin")
+export class AdminController {
+  // All routes in this controller require user.role = 'admin'
+
+  @Get("users")
+  async listUsers() {
+    return { users: [] };
+  }
+
+  @Get("settings")
+  async getSettings() {
+    return { settings: {} };
+  }
+}
+```
+
+## Security Model
+
+The `@Roles()` decorator enforces strict system-level role checking:
+
+```ts title="admin.controller.ts"
+import { Controller, Get } from "@nestjs/common";
+import { Roles } from "@thallesp/nestjs-better-auth";
+
+@Controller("admin")
+export class AdminController {
+  @Roles(["admin"])
+  @Get("system-settings")
+  async systemSettings() {
+    // ✅ Users with user.role = 'admin' can access
+    // ❌ Organization owners/admins CANNOT access
+    // ❌ Users without user.role = 'admin' CANNOT access
+    return { settings: {} };
+  }
+}
+```
+
+<Warning>
+  Organization admins cannot access `@Roles()` protected routes unless they also have the required `user.role`. This is intentional to prevent privilege escalation.
+</Warning>
+
+## Creating Admin Users
+
+Create users with system-level roles using Better Auth's admin API:
+
+```ts title="setup.ts"
+import { auth } from "./auth";
+
+// Create a system admin user
+const adminUser = await auth.api.createUser({
+  body: {
+    name: "System Admin",
+    email: "admin@example.com",
+    password: "secure-password",
+    role: "admin", // System-level role
+  },
+});
+
+// Create a moderator user
+const moderatorUser = await auth.api.createUser({
+  body: {
+    name: "Moderator",
+    email: "mod@example.com",
+    password: "secure-password",
+    role: "moderator", // System-level role
+  },
+});
+```
+
+## Role Format Support
+
+The decorator handles both array and comma-separated role formats:
+
+```ts
+// User role as string
+user.role = "admin"; // ✅ Matches @Roles(['admin'])
+
+// User role as array
+user.role = ["admin", "moderator"]; // ✅ Matches @Roles(['admin'])
+
+// User role as comma-separated string
+user.role = "admin,moderator"; // ✅ Matches @Roles(['admin'])
+```
+
+## Response Codes
+
+- **200**: User has required role and can access the route
+- **401**: User is not authenticated
+- **403**: User is authenticated but lacks the required role
+
+## Related
+
+<CardGroup cols={2}>
+  <Card title="Organization Roles" icon="building" href="/authorization/organization-roles">
+    Use @OrgRoles() for organization-level role checks
+  </Card>
+  <Card title="System Permissions" icon="shield" href="/authorization/permissions">
+    Use @UserHasPermission() for fine-grained permission control
+  </Card>
+</CardGroup>

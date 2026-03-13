@@ -1,0 +1,258 @@
+---
+title: AuthModule
+description: NestJS module that integrates Better Auth with NestJS applications
+---
+
+## Overview
+
+`AuthModule` is the core module that integrates Better Auth into your NestJS application. It provides authentication middleware, hooks support, global guard registration, and exception handling.
+
+## Installation
+
+```typescript
+import { Module } from '@nestjs/common';
+import { AuthModule } from '@better-auth/nestjs';
+import { auth } from './auth';
+
+@Module({
+  imports: [
+    AuthModule.forRoot({
+      auth,
+    }),
+  ],
+})
+export class AppModule {}
+```
+
+## Static Methods
+
+### forRoot()
+
+Registers the AuthModule synchronously with your Better Auth instance.
+
+<ParamField path="options" type="AuthModuleOptions" required>
+  Configuration options for the auth module
+  
+  <Expandable title="properties">
+    <ParamField path="auth" type="Auth" required>
+      Your Better Auth instance created with `betterAuth()`
+    </ParamField>
+    
+    <ParamField path="disableTrustedOriginsCors" type="boolean">
+      Disable automatic CORS configuration for Better Auth trustedOrigins. Default: `false`
+    </ParamField>
+    
+    <ParamField path="bodyParser" type="AuthModuleBodyParserOptions">
+      Configure body parser options for auth routes
+      
+      <Expandable title="properties">
+        <ParamField path="json" type="AuthModuleJsonBodyParserOptions">
+          JSON body parser configuration
+          
+          <Expandable title="properties">
+            <ParamField path="enabled" type="boolean">
+              Enable/disable JSON body parsing. Default: `true`
+            </ParamField>
+            
+            <ParamField path="limit" type="string">
+              Maximum request body size. Default: `'100kb'`
+            </ParamField>
+          </Expandable>
+        </ParamField>
+        
+        <ParamField path="urlencoded" type="AuthModuleUrlencodedBodyParserOptions">
+          URL-encoded body parser configuration
+          
+          <Expandable title="properties">
+            <ParamField path="enabled" type="boolean">
+              Enable/disable URL-encoded body parsing. Default: `true`
+            </ParamField>
+            
+            <ParamField path="extended" type="boolean">
+              Use extended URL-encoded parsing. Default: `false`
+            </ParamField>
+            
+            <ParamField path="limit" type="string">
+              Maximum request body size. Default: `'100kb'`
+            </ParamField>
+          </Expandable>
+        </ParamField>
+        
+        <ParamField path="rawBody" type="boolean">
+          When enabled, attaches the raw request buffer to `req.rawBody`. Useful for webhook signature verification. Default: `false`
+        </ParamField>
+      </Expandable>
+    </ParamField>
+    
+    <ParamField path="middleware" type="(req: Request, res: Response, next: NextFunction) => void">
+      Custom middleware function to wrap the auth handler
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+<ParamField path="extras" type="object">
+  Additional module configuration options
+  
+  <Expandable title="properties">
+    <ParamField path="isGlobal" type="boolean">
+      Make the module globally available. Default: `true`
+    </ParamField>
+    
+    <ParamField path="disableGlobalAuthGuard" type="boolean">
+      Disable automatic global AuthGuard registration. Default: `false`
+    </ParamField>
+    
+    <ParamField path="disableControllers" type="boolean">
+      Disable auth route controllers. Default: `false`
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+#### Example: Basic Setup
+
+```typescript
+import { AuthModule } from '@better-auth/nestjs';
+import { auth } from './auth';
+
+@Module({
+  imports: [
+    AuthModule.forRoot({
+      auth,
+    }),
+  ],
+})
+export class AppModule {}
+```
+
+#### Example: Custom Configuration
+
+```typescript
+AuthModule.forRoot({
+  auth,
+  bodyParser: {
+    json: { limit: '10mb' },
+    rawBody: true, // Enable for webhooks
+  },
+  disableTrustedOriginsCors: false,
+}, {
+  isGlobal: true,
+  disableGlobalAuthGuard: false,
+})
+```
+
+#### Example: Disable Global Guard
+
+```typescript
+// If you want to manually apply the guard to specific routes
+AuthModule.forRoot({ auth }, {
+  disableGlobalAuthGuard: true,
+})
+```
+
+### forRootAsync()
+
+Registers the AuthModule asynchronously, useful for dynamic configuration.
+
+<ParamField path="options" type="AsyncAuthModuleOptions" required>
+  Async configuration options
+  
+  <Expandable title="properties">
+    <ParamField path="imports" type="any[]">
+      Modules to import that provide dependencies
+    </ParamField>
+    
+    <ParamField path="useFactory" type="(...args: any[]) => AuthModuleOptions | Promise<AuthModuleOptions>" required>
+      Factory function that returns module options
+    </ParamField>
+    
+    <ParamField path="inject" type="any[]">
+      Providers to inject into the factory function
+    </ParamField>
+    
+    <ParamField path="isGlobal" type="boolean">
+      Make the module globally available. Default: `true`
+    </ParamField>
+    
+    <ParamField path="disableGlobalAuthGuard" type="boolean">
+      Disable automatic global AuthGuard registration. Default: `false`
+    </ParamField>
+    
+    <ParamField path="disableControllers" type="boolean">
+      Disable auth route controllers. Default: `false`
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+#### Example: Async Configuration
+
+```typescript
+import { ConfigService } from '@nestjs/config';
+
+@Module({
+  imports: [
+    AuthModule.forRootAsync({
+      imports: [ConfigModule],
+      inject: [ConfigService],
+      useFactory: async (config: ConfigService) => ({
+        auth: betterAuth({
+          database: config.get('database'),
+          // ... other options
+        }),
+      }),
+    }),
+  ],
+})
+export class AppModule {}
+```
+
+## Features
+
+### Automatic Base Path Configuration
+
+The module automatically:
+- Normalizes the `basePath` from your Better Auth config (default: `/api/auth`)
+- Excludes it from NestJS global prefix to avoid conflicts
+- Sets up middleware to handle all Better Auth routes
+
+### Hook Support
+
+The module discovers and registers providers decorated with `@Hook()` that contain `@BeforeHook()` or `@AfterHook()` methods:
+
+```typescript
+import { Hook, BeforeHook } from '@better-auth/nestjs';
+import type { AuthHookContext } from '@better-auth/nestjs';
+
+@Hook()
+@Injectable()
+export class AuthHooks {
+  @BeforeHook('/sign-in/email')
+  async beforeSignIn(ctx: AuthHookContext) {
+    console.log('User signing in:', ctx.body.email);
+  }
+}
+```
+
+### Global AuthGuard
+
+By default, the module registers `AuthGuard` globally. All routes require authentication unless marked with:
+- `@AllowAnonymous()` - Allow unauthenticated access
+- `@OptionalAuth()` - Allow optional authentication
+
+### CORS Configuration
+
+Automatically configures CORS based on your Better Auth `trustedOrigins` setting. Supports both Express and Fastify adapters.
+
+### Body Parser Management
+
+Handles body parsing for auth routes with configurable options for JSON, URL-encoded, and raw body support.
+
+## Related
+
+<CardGroup cols={2}>
+  <Card title="AuthService" href="/api/auth-service" icon="server">
+    Access Better Auth instance and API
+  </Card>
+  <Card title="AuthGuard" href="/api/auth-guard" icon="shield">
+    Route authentication and authorization
+  </Card>
+</CardGroup>

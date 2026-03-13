@@ -1,0 +1,323 @@
+---
+title: '@Roles'
+description: Specifies user-level roles required to access a route or controller
+---
+
+## Overview
+
+`@Roles()` is a decorator that restricts access to routes or controllers based on user-level roles. It checks **only** the `user.role` field from Better Auth's admin plugin and does **not** check organization member roles.
+
+Use this for system-wide admin protection (e.g., superadmin routes).
+
+## Type Signature
+
+```typescript
+export const Roles = (roles: string[]): CustomDecorator =>
+  SetMetadata("ROLES", roles);
+```
+
+## Parameters
+
+<ParamField path="roles" type="string[]" required>
+  Array of roles that are allowed to access the route. Users with any of these roles will be granted access.
+</ParamField>
+
+## Usage
+
+### Basic Usage
+
+```typescript
+import { Controller, Get } from '@nestjs/common';
+import { Roles, Session } from '@better-auth/nestjs';
+import type { UserSession } from '@better-auth/nestjs';
+
+@Controller('admin')
+export class AdminController {
+  @Roles(['admin'])
+  @Get('dashboard')
+  getDashboard(@Session() session: UserSession) {
+    return 'Admin dashboard';
+  }
+}
+```
+
+### Multiple Roles
+
+```typescript
+@Controller('admin')
+export class AdminController {
+  @Roles(['admin', 'superadmin', 'moderator'])
+  @Get('users')
+  listUsers() {
+    return 'List of all users';
+  }
+}
+```
+
+### On a Controller
+
+```typescript
+import { Controller, Get, Delete } from '@nestjs/common';
+import { Roles } from '@better-auth/nestjs';
+
+@Roles(['admin'])
+@Controller('admin')
+export class AdminController {
+  @Get('users')
+  listUsers() {
+    return 'All admins can list users';
+  }
+
+  @Roles(['superadmin']) // More restrictive
+  @Delete('users/:id')
+  deleteUser(@Param('id') id: string) {
+    return 'Only superadmins can delete users';
+  }
+}
+```
+
+## Examples
+
+### Admin Dashboard
+
+```typescript
+@Controller('admin')
+export class AdminController {
+  @Roles(['admin'])
+  @Get('dashboard')
+  async getDashboard() {
+    return {
+      totalUsers: await this.usersService.count(),
+      totalOrders: await this.ordersService.count(),
+      revenue: await this.analyticsService.getTotalRevenue(),
+    };
+  }
+
+  @Roles(['admin'])
+  @Get('reports')
+  getReports() {
+    return this.reportsService.getAdminReports();
+  }
+}
+```
+
+### Superadmin-Only Routes
+
+```typescript
+@Controller('system')
+export class SystemController {
+  @Roles(['superadmin'])
+  @Post('maintenance')
+  enableMaintenance() {
+    return this.systemService.enableMaintenanceMode();
+  }
+
+  @Roles(['superadmin'])
+  @Delete('cache')
+  clearCache() {
+    return this.cacheService.clearAll();
+  }
+
+  @Roles(['superadmin'])
+  @Post('migrate')
+  runMigration() {
+    return this.databaseService.migrate();
+  }
+}
+```
+
+### Moderator Features
+
+```typescript
+@Controller('moderation')
+export class ModerationController {
+  @Roles(['admin', 'moderator'])
+  @Get('reports')
+  getReports() {
+    return this.moderationService.getPendingReports();
+  }
+
+  @Roles(['admin', 'moderator'])
+  @Post('content/:id/flag')
+  flagContent(@Param('id') id: string) {
+    return this.moderationService.flagContent(id);
+  }
+
+  @Roles(['admin']) // Only admins can ban
+  @Post('users/:id/ban')
+  banUser(@Param('id') id: string) {
+    return this.moderationService.banUser(id);
+  }
+}
+```
+
+### Mixed Access Levels
+
+```typescript
+@Controller('users')
+export class UsersController {
+  @Get('me')
+  getCurrentUser(@Session() session: UserSession) {
+    // Any authenticated user
+    return session.user;
+  }
+
+  @Roles(['admin', 'moderator'])
+  @Get()
+  listAllUsers() {
+    // Only admins and moderators
+    return this.usersService.findAll();
+  }
+
+  @Roles(['admin'])
+  @Patch(':id/role')
+  updateUserRole(@Param('id') id: string, @Body() dto: UpdateRoleDto) {
+    // Only admins
+    return this.usersService.updateRole(id, dto.role);
+  }
+}
+```
+
+## Role Format Support
+
+The decorator supports multiple role formats:
+
+### Single Role (String)
+
+```typescript
+// user.role = 'admin'
+@Roles(['admin'])
+```
+
+### Multiple Roles (Array)
+
+```typescript
+// user.role = ['admin', 'moderator']
+@Roles(['admin']) // Matches because 'admin' is in the array
+```
+
+### Comma-Separated Roles (String)
+
+```typescript
+// user.role = 'admin,moderator'
+@Roles(['admin']) // Matches because 'admin' is in the comma-separated list
+```
+
+## Authorization Logic
+
+The guard checks if the user's role matches **any** of the required roles:
+
+```typescript
+// User has role 'moderator'
+@Roles(['admin', 'moderator', 'superadmin'])
+// ✅ Access granted - 'moderator' is in the allowed list
+
+// User has role 'user'
+@Roles(['admin', 'moderator'])
+// ❌ Access denied - 'user' is not in the allowed list
+```
+
+## Error Handling
+
+When authorization fails, the guard throws:
+
+```typescript
+// HTTP Context
+throw new ForbiddenException({
+  code: 'FORBIDDEN',
+  message: 'Insufficient permissions',
+});
+
+// GraphQL Context
+throw new ForbiddenException('Insufficient permissions');
+
+// WebSocket Context
+throw new WsException('FORBIDDEN');
+```
+
+## Setup Requirements
+
+To use `@Roles()`, you must:
+
+1. **Enable the admin plugin** in your Better Auth configuration:
+
+```typescript
+import { betterAuth } from 'better-auth';
+import { admin } from 'better-auth/plugins';
+
+export const auth = betterAuth({
+  database: /* ... */,
+  plugins: [
+    admin(), // Adds user.role field
+  ],
+});
+```
+
+2. **Assign roles to users**:
+
+```typescript
+// When creating a user
+await authService.api.createUser({
+  body: {
+    email: 'admin@example.com',
+    password: 'password',
+    role: 'admin',
+  },
+});
+
+// Or update existing user
+await authService.api.updateUser({
+  body: {
+    userId: 'user-id',
+    role: 'admin',
+  },
+});
+```
+
+## Comparison with @OrgRoles
+
+| Feature | @Roles | @OrgRoles |
+|---------|--------|----------|
+| Checks | `user.role` | Organization member role |
+| Plugin required | Admin | Organization |
+| Scope | System-wide | Organization-specific |
+| Active org required | No | Yes |
+| Use case | App admins, moderators | Org owners, managers |
+
+## When to Use
+
+Use `@Roles()` for:
+
+- **System-wide admin panels** - Backend administration
+- **Global moderation** - Content moderation across all organizations
+- **Super admin features** - Database management, migrations
+- **Support staff** - Customer support dashboards
+- **App-level permissions** - Not organization-specific
+
+Use [`@OrgRoles()`](/api/decorators/org-roles) for:
+
+- **Organization-specific features** - Org settings, billing
+- **Team management** - Within an organization context
+- **Multi-tenant access** - Different roles per organization
+
+## Notes
+
+- Requires Better Auth admin plugin
+- Does **not** check organization member roles
+- Method-level decorator overrides controller-level
+- Can be combined with other decorators like `@UserHasPermission()`
+- User must be authenticated before role check
+
+## Related
+
+<CardGroup cols={3}>
+  <Card title="@OrgRoles" href="/api/decorators/org-roles" icon="users">
+    Organization role authorization
+  </Card>
+  <Card title="@UserHasPermission" href="/api/decorators/user-has-permission" icon="key">
+    User permission checks
+  </Card>
+  <Card title="AuthGuard" href="/api/auth-guard" icon="shield">
+    Authentication guard
+  </Card>
+</CardGroup>

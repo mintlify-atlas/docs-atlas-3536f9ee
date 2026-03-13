@@ -1,0 +1,503 @@
+---
+title: "GraphQL Support"
+description: "Protect GraphQL resolvers with Better Auth authentication"
+---
+
+## Overview
+
+GraphQL resolvers work seamlessly with Better Auth authentication. The global `AuthGuard` automatically applies to all queries and mutations, and you can use the same decorators (`@AllowAnonymous()`, `@OptionalAuth()`, `@Session()`) as with REST routes.
+
+## Basic Setup
+
+### 1. Install GraphQL Dependencies
+
+```bash
+npm install @nestjs/graphql @nestjs/apollo @apollo/server graphql
+```
+
+### 2. Configure GraphQL Module
+
+```ts title="app.module.ts"
+import { Module } from "@nestjs/common";
+import { GraphQLModule } from "@nestjs/graphql";
+import { ApolloDriver, ApolloDriverConfig } from "@nestjs/apollo";
+import { AuthModule } from "@thallesp/nestjs-better-auth";
+import { auth } from "./auth";
+
+@Module({
+  imports: [
+    AuthModule.forRoot({ auth }),
+    GraphQLModule.forRoot<ApolloDriverConfig>({
+      driver: ApolloDriver,
+      autoSchemaFile: true,
+    }),
+  ],
+})
+export class AppModule {}
+```
+
+### 3. Create a Resolver
+
+```ts title="resolvers/user.resolver.ts"
+import { Resolver, Query } from "@nestjs/graphql";
+import { Session, type UserSession } from "@thallesp/nestjs-better-auth";
+
+@Resolver()
+export class UserResolver {
+  @Query(() => String)
+  currentUser(@Session() session: UserSession) {
+    return session.user.name;
+  }
+}
+```
+
+## Protected Queries and Mutations
+
+By default, all resolvers are protected:
+
+```ts
+import { Resolver, Query, Mutation, Args } from "@nestjs/graphql";
+import { Session, type UserSession } from "@thallesp/nestjs-better-auth";
+
+@Resolver()
+export class UserResolver {
+  // Protected query - requires authentication
+  @Query(() => User)
+  me(@Session() session: UserSession) {
+    return {
+      id: session.user.id,
+      name: session.user.name,
+      email: session.user.email,
+    };
+  }
+
+  // Protected mutation - requires authentication
+  @Mutation(() => Boolean)
+  updateProfile(
+    @Session() session: UserSession,
+    @Args("name") name: string
+  ) {
+    // Update user profile
+    return true;
+  }
+}
+```
+
+## Public Queries and Mutations
+
+Use `@AllowAnonymous()` for public access:
+
+```ts
+import { AllowAnonymous } from "@thallesp/nestjs-better-auth";
+import { Resolver, Query } from "@nestjs/graphql";
+
+@Resolver()
+export class PublicResolver {
+  @AllowAnonymous()
+  @Query(() => String)
+  publicHello() {
+    return "Hello, World!";
+  }
+
+  @AllowAnonymous()
+  @Query(() => [Product])
+  products() {
+    return this.productService.findAll();
+  }
+}
+```
+
+## Optional Authentication
+
+Make authentication optional for a query or mutation:
+
+```ts
+import { OptionalAuth, Session, type UserSession } from "@thallesp/nestjs-better-auth";
+import { Resolver, Query, ObjectType, Field } from "@nestjs/graphql";
+
+@ObjectType()
+class AuthStatus {
+  @Field()
+  authenticated: boolean;
+
+  @Field(() => String, { nullable: true })
+  userId?: string;
+}
+
+@Resolver()
+export class StatusResolver {
+  @OptionalAuth()
+  @Query(() => AuthStatus)
+  checkAuth(@Session() session: UserSession) {
+    return {
+      authenticated: !!session,
+      userId: session?.user?.id,
+    };
+  }
+}
+```
+
+## Accessing the Session
+
+Use the `@Session()` decorator to access the authenticated user:
+
+```ts
+import { Resolver, Query, ObjectType, Field } from "@nestjs/graphql";
+import { Session, type UserSession } from "@thallesp/nestjs-better-auth";
+
+@ObjectType()
+class UserProfile {
+  @Field()
+  id: string;
+
+  @Field()
+  name: string;
+
+  @Field()
+  email: string;
+
+  @Field({ nullable: true })
+  role?: string;
+}
+
+@Resolver()
+export class ProfileResolver {
+  @Query(() => UserProfile)
+  profile(@Session() session: UserSession) {
+    return {
+      id: session.user.id,
+      name: session.user.name,
+      email: session.user.email,
+      role: session.user.role,
+    };
+  }
+}
+```
+
+## Role-Based Access Control
+
+Protect resolvers based on user roles:
+
+```ts
+import { Roles } from "@thallesp/nestjs-better-auth";
+import { Resolver, Query } from "@nestjs/graphql";
+
+@Resolver()
+export class AdminResolver {
+  @Roles(["admin"])
+  @Query(() => String)
+  adminDashboard() {
+    return "Admin dashboard data";
+  }
+
+  @Roles(["admin", "moderator"])
+  @Query(() => [User])
+  allUsers() {
+    return this.userService.findAll();
+  }
+}
+```
+
+## Complete Example
+
+Here's a complete resolver with multiple access levels:
+
+```ts title="resolvers/user.resolver.ts"
+import { Resolver, Query, Mutation, Args, ObjectType, Field } from "@nestjs/graphql";
+import {
+  AllowAnonymous,
+  OptionalAuth,
+  Session,
+  Roles,
+  type UserSession,
+} from "@thallesp/nestjs-better-auth";
+
+@ObjectType()
+class User {
+  @Field()
+  id: string;
+
+  @Field()
+  name: string;
+
+  @Field()
+  email: string;
+}
+
+@ObjectType()
+class AuthStatus {
+  @Field()
+  authenticated: boolean;
+
+  @Field(() => String, { nullable: true })
+  userId?: string;
+}
+
+@Resolver()
+export class UserResolver {
+  // Public query - no authentication required
+  @AllowAnonymous()
+  @Query(() => String)
+  publicHello() {
+    return "Hello, World!";
+  }
+
+  // Optional authentication
+  @OptionalAuth()
+  @Query(() => AuthStatus)
+  checkAuth(@Session() session: UserSession) {
+    return {
+      authenticated: !!session,
+      userId: session?.user?.id,
+    };
+  }
+
+  // Protected query - requires authentication
+  @Query(() => User)
+  me(@Session() session: UserSession) {
+    return {
+      id: session.user.id,
+      name: session.user.name,
+      email: session.user.email,
+    };
+  }
+
+  // Admin-only query
+  @Roles(["admin"])
+  @Query(() => [User])
+  allUsers() {
+    return this.userService.findAll();
+  }
+
+  // Admin or moderator query
+  @Roles(["admin", "moderator"])
+  @Query(() => String)
+  moderatorData() {
+    return "Moderator data";
+  }
+}
+```
+
+## Client-Side Authentication
+
+### Using Apollo Client
+
+```ts title="client.ts"
+import { ApolloClient, InMemoryCache, createHttpLink } from "@apollo/client";
+import { setContext } from "@apollo/client/link/context";
+
+// Get token from Better Auth
+const { token } = await signIn(email, password);
+
+// Add authentication to Apollo Client
+const httpLink = createHttpLink({
+  uri: "http://localhost:3000/graphql",
+});
+
+const authLink = setContext((_, { headers }) => {
+  return {
+    headers: {
+      ...headers,
+      authorization: token ? `Bearer ${token}` : "",
+    },
+  };
+});
+
+const client = new ApolloClient({
+  link: authLink.concat(httpLink),
+  cache: new InMemoryCache(),
+});
+
+// Make authenticated queries
+const { data } = await client.query({
+  query: gql`
+    query {
+      me {
+        id
+        name
+        email
+      }
+    }
+  `,
+});
+```
+
+### Using fetch
+
+```ts
+// Get token
+const { token } = await signIn(email, password);
+
+// Make GraphQL request
+const response = await fetch("http://localhost:3000/graphql", {
+  method: "POST",
+  headers: {
+    "Content-Type": "application/json",
+    Authorization: `Bearer ${token}`,
+  },
+  body: JSON.stringify({
+    query: `
+      query {
+        me {
+          id
+          name
+          email
+        }
+      }
+    `,
+  }),
+});
+
+const { data } = await response.json();
+```
+
+## Testing GraphQL Authentication
+
+Example test for GraphQL authentication:
+
+```ts title="graphql-auth.e2e.test.ts"
+import request from "supertest";
+import { faker } from "@faker-js/faker";
+
+it("should resolve public query without auth", async () => {
+  const response = await request(app.getHttpServer())
+    .post("/graphql")
+    .set("Content-Type", "application/json")
+    .send({ query: "{ publicHello }" })
+    .expect(200);
+
+  expect(response.body?.data?.publicHello).toBe("Hello, World!");
+});
+
+it("should require auth for protected query", async () => {
+  const response = await request(app.getHttpServer())
+    .post("/graphql")
+    .set("Content-Type", "application/json")
+    .send({ query: "{ me { id } }" })
+    .expect(200);
+
+  expect(Array.isArray(response.body?.errors)).toBe(true);
+});
+
+it("should resolve protected query with auth", async () => {
+  const signUp = await auth.api.signUpEmail({
+    body: {
+      name: faker.person.fullName(),
+      email: faker.internet.email(),
+      password: faker.internet.password({ length: 10 }),
+    },
+  });
+
+  const response = await request(app.getHttpServer())
+    .post("/graphql")
+    .set("Content-Type", "application/json")
+    .set("Authorization", `Bearer ${signUp.token}`)
+    .send({ query: "{ me { id name } }" })
+    .expect(200);
+
+  expect(response.body?.data?.me).toMatchObject({
+    id: signUp.user.id,
+    name: signUp.user.name,
+  });
+});
+```
+
+## Error Handling
+
+Handle authentication errors in GraphQL:
+
+```ts
+import { Resolver, Query } from "@nestjs/graphql";
+import { UnauthorizedException } from "@nestjs/common";
+import { Session, type UserSession } from "@thallesp/nestjs-better-auth";
+
+@Resolver()
+export class SecureResolver {
+  @Query(() => String)
+  secureData(@Session() session: UserSession) {
+    if (!session) {
+      throw new UnauthorizedException("You must be logged in");
+    }
+    
+    return "Secure data";
+  }
+}
+```
+
+Clients will receive GraphQL errors:
+
+```json
+{
+  "errors": [
+    {
+      "message": "You must be logged in",
+      "extensions": {
+        "code": "UNAUTHORIZED"
+      }
+    }
+  ]
+}
+```
+
+## Execution Context
+
+The library handles execution context for both HTTP and GraphQL:
+
+```ts
+import { ExecutionContext } from "@nestjs/common";
+import { GqlExecutionContext } from "@nestjs/graphql";
+
+// The AuthGuard automatically handles both contexts:
+// - HTTP: Uses ExecutionContext directly
+// - GraphQL: Converts to GqlExecutionContext
+
+// You don't need to handle this manually - just use @Session()
+@Query(() => User)
+me(@Session() session: UserSession) {
+  return session.user;
+}
+```
+
+## Important Notes
+
+<Note>
+  - The global `AuthGuard` automatically applies to GraphQL resolvers
+  - Use `@AllowAnonymous()` to make queries/mutations public
+  - Use `@OptionalAuth()` to make authentication optional
+  - Use `@Session()` to access the authenticated user
+  - The same decorators work for GraphQL and REST routes
+</Note>
+
+<Warning>
+  - GraphQL errors are returned in the `errors` array, not as HTTP status codes
+  - Ensure your client properly handles GraphQL error responses
+  - Authentication happens per request, not per query (if batching)
+</Warning>
+
+## Troubleshooting
+
+### Authentication Not Working
+
+**Problem:** GraphQL queries don't require authentication.
+
+**Solutions:**
+- Verify `AuthModule` is imported before `GraphQLModule`
+- Check that the global guard is not disabled
+- Ensure you're not using `@AllowAnonymous()` unintentionally
+
+### Session is Undefined
+
+**Problem:** `@Session()` returns `undefined`.
+
+**Solutions:**
+- Verify the client is sending the `Authorization` header
+- Check the token format: `Bearer <token>`
+- Ensure the query/mutation is not marked with `@AllowAnonymous()`
+
+### GraphQL Playground Not Working
+
+**Problem:** GraphQL Playground requires authentication.
+
+**Solutions:**
+- Add `Authorization` header in the Playground settings
+- Or mark introspection queries as public (not recommended for production)

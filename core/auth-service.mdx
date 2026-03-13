@@ -1,0 +1,425 @@
+---
+title: 'AuthService'
+description: 'Access Better Auth API methods in your NestJS application'
+icon: 'code'
+---
+
+The `AuthService` provides access to your Better Auth instance and its API endpoints from anywhere in your NestJS application. It's automatically provided by the AuthModule and supports dependency injection.
+
+## Overview
+
+The AuthService gives you access to:
+
+- **Better Auth API endpoints** - All methods from `auth.api`
+- **Complete Auth instance** - Plugin-specific functionality and configuration
+- **Type-safe access** - Full TypeScript support with generics
+
+## Basic Usage
+
+Inject the AuthService into your controllers or services:
+
+```typescript title="users.controller.ts"
+import { Controller, Get, Request } from '@nestjs/common';
+import { AuthService } from '@thallesp/nestjs-better-auth';
+import { fromNodeHeaders } from 'better-auth/node';
+import type { Request as ExpressRequest } from 'express';
+
+@Controller('users')
+export class UsersController {
+  constructor(private readonly authService: AuthService) {}
+
+  @Get('accounts')
+  async getAccounts(@Request() req: ExpressRequest) {
+    const accounts = await this.authService.api.listUserAccounts({
+      headers: fromNodeHeaders(req.headers),
+    });
+
+    return { accounts };
+  }
+}
+```
+
+## Service Structure
+
+The AuthService is a simple wrapper around your Better Auth instance:
+
+```typescript
+export class AuthService<T extends { api: T['api'] } = Auth> {
+  constructor(
+    @Inject(MODULE_OPTIONS_TOKEN)
+    private readonly options: AuthModuleOptions<T>,
+  ) {}
+
+  get api(): T['api'] {
+    return this.options.auth.api;
+  }
+
+  get instance(): T {
+    return this.options.auth;
+  }
+}
+```
+
+**Source:** `/workspace/source/src/auth-service.ts:12-32`
+
+### Properties
+
+#### `api`
+
+Provides access to all Better Auth API endpoints:
+
+```typescript
+get api(): T['api'] {
+  return this.options.auth.api;
+}
+```
+
+These are the server-side methods from Better Auth that handle:
+- Session management
+- User management
+- Account linking
+- Plugin-specific operations
+
+#### `instance`
+
+Provides access to the complete Better Auth instance:
+
+```typescript
+get instance(): T {
+  return this.options.auth;
+}
+```
+
+Use this for:
+- Plugin-specific functionality
+- Direct access to configuration
+- Advanced Better Auth features
+
+## Working with Better Auth API
+
+All Better Auth API methods accept a `headers` parameter for session validation. Always pass the request headers:
+
+```typescript
+import { fromNodeHeaders } from 'better-auth/node';
+
+const result = await this.authService.api.someMethod({
+  headers: fromNodeHeaders(req.headers),
+  // ... other parameters
+});
+```
+
+### Common API Methods
+
+#### Session Management
+
+```typescript
+// Get current session
+const session = await this.authService.api.getSession({
+  headers: fromNodeHeaders(req.headers),
+});
+
+// List user sessions
+const sessions = await this.authService.api.listSessions({
+  headers: fromNodeHeaders(req.headers),
+});
+```
+
+#### User Management
+
+```typescript
+// Get user accounts
+const accounts = await this.authService.api.listUserAccounts({
+  headers: fromNodeHeaders(req.headers),
+});
+
+// Update user
+const user = await this.authService.api.updateUser({
+  headers: fromNodeHeaders(req.headers),
+  body: {
+    name: 'New Name',
+    image: 'https://example.com/avatar.jpg',
+  },
+});
+```
+
+## Using with Plugins
+
+When using Better Auth plugins, use generics to get type-safe access to plugin methods:
+
+```typescript title="auth.ts"
+import { betterAuth } from 'better-auth';
+import { organization } from 'better-auth/plugins';
+
+export const auth = betterAuth({
+  // ... configuration
+  plugins: [organization()],
+});
+```
+
+```typescript title="organization.controller.ts"
+import { Controller, Get, Post, Request, Body } from '@nestjs/common';
+import { AuthService } from '@thallesp/nestjs-better-auth';
+import { fromNodeHeaders } from 'better-auth/node';
+import type { Request as ExpressRequest } from 'express';
+import { auth } from '../auth';
+
+@Controller('organizations')
+export class OrganizationController {
+  // Use generics for type-safe plugin access
+  constructor(private readonly authService: AuthService<typeof auth>) {}
+
+  @Get()
+  async listOrganizations(@Request() req: ExpressRequest) {
+    // TypeScript knows about organization plugin methods
+    const orgs = await this.authService.api.listOrganizations({
+      headers: fromNodeHeaders(req.headers),
+    });
+
+    return { organizations: orgs };
+  }
+
+  @Post()
+  async createOrganization(
+    @Request() req: ExpressRequest,
+    @Body() body: { name: string; slug: string },
+  ) {
+    const org = await this.authService.api.createOrganization({
+      headers: fromNodeHeaders(req.headers),
+      body,
+    });
+
+    return { organization: org };
+  }
+}
+```
+
+## Example: API Key Management
+
+Here's a complete example using a custom Better Auth plugin:
+
+```typescript title="api-keys.controller.ts"
+import { Controller, Get, Post, Delete, Request, Body, Param } from '@nestjs/common';
+import { AuthService } from '@thallesp/nestjs-better-auth';
+import { fromNodeHeaders } from 'better-auth/node';
+import type { Request as ExpressRequest } from 'express';
+import { auth } from '../auth';
+
+@Controller('api-keys')
+export class ApiKeysController {
+  constructor(private readonly authService: AuthService<typeof auth>) {}
+
+  @Get()
+  async listApiKeys(@Request() req: ExpressRequest) {
+    const keys = await this.authService.api.listApiKeys({
+      headers: fromNodeHeaders(req.headers),
+    });
+
+    return { apiKeys: keys };
+  }
+
+  @Post()
+  async createApiKey(
+    @Request() req: ExpressRequest,
+    @Body() body: { name: string; expiresIn?: number },
+  ) {
+    const apiKey = await this.authService.api.createApiKey({
+      headers: fromNodeHeaders(req.headers),
+      body,
+    });
+
+    return { apiKey };
+  }
+
+  @Delete(':id')
+  async revokeApiKey(
+    @Request() req: ExpressRequest,
+    @Param('id') id: string,
+  ) {
+    await this.authService.api.revokeApiKey({
+      headers: fromNodeHeaders(req.headers),
+      body: { id },
+    });
+
+    return { success: true };
+  }
+}
+```
+
+## Example: Organization Management
+
+Using the organization plugin:
+
+```typescript title="org.service.ts"
+import { Injectable, Request } from '@nestjs/common';
+import { AuthService } from '@thallesp/nestjs-better-auth';
+import { fromNodeHeaders } from 'better-auth/node';
+import type { Request as ExpressRequest } from 'express';
+import { auth } from '../auth';
+
+@Injectable()
+export class OrgService {
+  constructor(private readonly authService: AuthService<typeof auth>) {}
+
+  async inviteMember(req: ExpressRequest, email: string, role: string) {
+    return this.authService.api.inviteUser({
+      headers: fromNodeHeaders(req.headers),
+      body: {
+        email,
+        role,
+      },
+    });
+  }
+
+  async removeMember(req: ExpressRequest, userId: string) {
+    return this.authService.api.removeMember({
+      headers: fromNodeHeaders(req.headers),
+      body: {
+        userId,
+      },
+    });
+  }
+
+  async setActiveOrganization(req: ExpressRequest, organizationId: string) {
+    return this.authService.api.setActiveOrganization({
+      headers: fromNodeHeaders(req.headers),
+      body: {
+        organizationId,
+      },
+    });
+  }
+}
+```
+
+## Accessing the Auth Instance
+
+For advanced use cases, access the complete Better Auth instance:
+
+```typescript
+import { Injectable } from '@nestjs/common';
+import { AuthService } from '@thallesp/nestjs-better-auth';
+import { auth } from '../auth';
+
+@Injectable()
+export class AdvancedAuthService {
+  constructor(private readonly authService: AuthService<typeof auth>) {}
+
+  getAuthOptions() {
+    // Access Better Auth configuration
+    return this.authService.instance.options;
+  }
+
+  getBasePath() {
+    return this.authService.instance.options.basePath;
+  }
+
+  getTrustedOrigins() {
+    return this.authService.instance.options.trustedOrigins;
+  }
+}
+```
+
+## Best Practices
+
+### Always Pass Headers
+
+Better Auth API methods need headers for session validation:
+
+```typescript
+// ✅ Good - Pass request headers
+const result = await this.authService.api.someMethod({
+  headers: fromNodeHeaders(req.headers),
+});
+
+// ❌ Bad - Missing headers
+const result = await this.authService.api.someMethod({});
+```
+
+### Use Type Generics
+
+Get full type safety by specifying your auth instance type:
+
+```typescript
+// ✅ Good - Type-safe plugin access
+constructor(private authService: AuthService<typeof auth>) {}
+
+// ⚠️ Okay - But no plugin type hints
+constructor(private authService: AuthService) {}
+```
+
+### Handle Errors
+
+Better Auth API methods can throw errors:
+
+```typescript
+import { BadRequestException } from '@nestjs/common';
+
+try {
+  const result = await this.authService.api.someMethod({
+    headers: fromNodeHeaders(req.headers),
+    body: data,
+  });
+  return result;
+} catch (error) {
+  throw new BadRequestException(error.message);
+}
+```
+
+## Integration with Guards
+
+The AuthService works seamlessly with AuthGuard. The guard validates sessions, and the service provides API access:
+
+```typescript
+import { Controller, Get, Session, Request } from '@nestjs/common';
+import { AuthService, UserSession } from '@thallesp/nestjs-better-auth';
+import { fromNodeHeaders } from 'better-auth/node';
+import type { Request as ExpressRequest } from 'express';
+
+@Controller('profile')
+export class ProfileController {
+  constructor(private readonly authService: AuthService) {}
+
+  @Get()
+  async getProfile(
+    @Session() session: UserSession, // From AuthGuard
+    @Request() req: ExpressRequest,
+  ) {
+    // Session is already validated by AuthGuard
+    // Use AuthService to fetch additional data
+    const accounts = await this.authService.api.listUserAccounts({
+      headers: fromNodeHeaders(req.headers),
+    });
+
+    return {
+      user: session.user,
+      accounts,
+    };
+  }
+}
+```
+
+## Source Reference
+
+The AuthService implementation:
+
+**Source:** `/workspace/source/src/auth-service.ts:12-32`
+
+Key properties:
+- `api` getter - `/workspace/source/src/auth-service.ts:21-23`
+- `instance` getter - `/workspace/source/src/auth-service.ts:29-31`
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Session Decorator" icon="at" href="/api/decorators/session">
+    Access session data in your controllers
+  </Card>
+  <Card title="AuthGuard" icon="shield-halved" href="/core/auth-guard">
+    Learn how route protection works
+  </Card>
+  <Card title="Better Auth API" icon="book" href="https://www.better-auth.com/docs/api-reference">
+    Explore all available API methods
+  </Card>
+  <Card title="Plugins" icon="plug" href="https://www.better-auth.com/docs/plugins">
+    Extend Better Auth with plugins
+  </Card>
+</CardGroup>

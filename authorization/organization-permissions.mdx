@@ -1,0 +1,348 @@
+---
+title: Organization-Level Permissions
+description: Protect routes using organization member permissions with the @MemberHasPermission() decorator
+---
+
+The `@MemberHasPermission()` decorator provides organization-scoped permission-based access control using Better Auth's [organization plugin access control](https://www.better-auth.com/docs/plugins/organization/access-control).
+
+<Warning>
+  Routes protected with `@MemberHasPermission()` require an active organization (`activeOrganizationId` in session). Users without an active organization will receive a 403 Forbidden response.
+</Warning>
+
+## Prerequisites
+
+Configure Better Auth with the organization plugin and access control:
+
+```ts title="auth.ts"
+import { betterAuth } from "better-auth";
+import { organization } from "better-auth/plugins/organization";
+import { createAccessControl } from "better-auth/plugins/access";
+
+// Define permission statement (resources and actions)
+const statement = {
+  project: ["create", "share", "update", "delete"],
+  sale: ["create", "read", "update", "delete"],
+  organization: ["update", "delete"],
+} as const;
+
+const ac = createAccessControl(statement);
+
+// Create organization roles with specific permissions
+const editor = ac.newRole({
+  project: ["create", "update"],
+});
+
+const admin = ac.newRole({
+  project: ["create", "update", "delete"],
+  organization: ["update"],
+});
+
+export const auth = betterAuth({
+  basePath: "/api/auth",
+  plugins: [
+    organization({
+      ac,
+      roles: {
+        editor,
+        admin,
+      },
+    }),
+  ],
+});
+```
+
+## Basic Usage
+
+Restrict routes based on organization member permissions:
+
+```ts title="org-project.controller.ts"
+import { Controller, Post } from "@nestjs/common";
+import { MemberHasPermission, Session, UserSession } from "@thallesp/nestjs-better-auth";
+
+@Controller("org/projects")
+export class OrgProjectController {
+  @MemberHasPermission({ permissions: { project: ["create", "update"] } })
+  @Post()
+  async createProject(@Session() session: UserSession) {
+    // Only org members with project: ["create", "update"] permissions can access
+    // Requires activeOrganizationId in session
+    return {
+      message: "Project created",
+      orgId: session.session.activeOrganizationId,
+    };
+  }
+
+  @MemberHasPermission({ permissions: { project: ["delete"] } })
+  @Post(":id/delete")
+  async deleteProject() {
+    // Only org members with project: ["delete"] permission can access
+    return { message: "Project deleted" };
+  }
+}
+```
+
+## Multiple Resource Permissions
+
+Check permissions across multiple resources:
+
+```ts title="org-project.controller.ts"
+import { Controller, Post } from "@nestjs/common";
+import { MemberHasPermission } from "@thallesp/nestjs-better-auth";
+
+@Controller("org/projects")
+export class OrgProjectController {
+  @MemberHasPermission({
+    permissions: {
+      project: ["create", "update"],
+      sale: ["create"],
+    },
+  })
+  @Post("with-sale")
+  async createProjectWithSale() {
+    // Member must have ALL specified permissions:
+    // - project: ["create", "update"]
+    // - sale: ["create"]
+    return { message: "Project and sale created" };
+  }
+}
+```
+
+<Warning>
+  When specifying multiple resources, the member must have ALL permissions. This is an AND operation, not OR.
+</Warning>
+
+## Organization Management Permissions
+
+Protect organization management routes:
+
+```ts title="org-settings.controller.ts"
+import { Controller, Get, Post, Delete } from "@nestjs/common";
+import { MemberHasPermission } from "@thallesp/nestjs-better-auth";
+
+@Controller("org/settings")
+export class OrgSettingsController {
+  @MemberHasPermission({ permissions: { organization: ["update"] } })
+  @Post()
+  async updateSettings() {
+    // Only members with organization:update permission can access
+    return { message: "Settings updated" };
+  }
+
+  @MemberHasPermission({ permissions: { organization: ["delete"] } })
+  @Delete()
+  async deleteOrganization() {
+    // Only members with organization:delete permission can access
+    return { message: "Organization deleted" };
+  }
+}
+```
+
+## Controller-Level Protection
+
+Apply permission requirements to an entire controller:
+
+```ts title="org-project.controller.ts"
+import { Controller, Get, Post } from "@nestjs/common";
+import { MemberHasPermission } from "@thallesp/nestjs-better-auth";
+
+@MemberHasPermission({ permissions: { project: ["create", "update"] } })
+@Controller("org/projects")
+export class OrgProjectController {
+  // All routes require project:create AND project:update permissions
+
+  @Get()
+  async listProjects() {
+    return { projects: [] };
+  }
+
+  @Post()
+  async createProject() {
+    return { message: "Project created" };
+  }
+}
+```
+
+## Active Organization Requirement
+
+The decorator requires an active organization:
+
+```ts title="org-project.controller.ts"
+import { Controller, Get } from "@nestjs/common";
+import { MemberHasPermission, Session, UserSession } from "@thallesp/nestjs-better-auth";
+
+@Controller("org/projects")
+export class OrgProjectController {
+  @MemberHasPermission({ permissions: { project: ["create"] } })
+  @Get()
+  async listProjects(@Session() session: UserSession) {
+    // ✅ Members with activeOrganizationId AND project:create permission can access
+    // ❌ Users without activeOrganizationId receive 403
+    // ❌ Members without required permission receive 403
+    const orgId = session.session.activeOrganizationId;
+    return { projects: [], orgId };
+  }
+}
+```
+
+## Managing Organization Members with Permissions
+
+Add members to organizations with roles that grant permissions:
+
+```ts title="org-management.ts"
+import { auth } from "./auth";
+
+// Add a member with 'editor' role (has project permissions)
+await auth.api.addMember({
+  body: {
+    organizationId: "org-123",
+    userId: "user-456",
+    role: "editor", // Has project: ["create", "update"] permissions
+  },
+});
+
+// Add a member with 'admin' role (has more permissions)
+await auth.api.addMember({
+  body: {
+    organizationId: "org-123",
+    userId: "user-789",
+    role: "admin", // Has project: ["create", "update", "delete"] + org: ["update"]
+  },
+});
+
+// User sets their active organization
+await auth.api.setActiveOrganization({
+  body: {
+    organizationId: "org-123",
+  },
+  headers: {
+    Authorization: `Bearer ${userToken}`,
+  },
+});
+```
+
+## Complex Permission Scenarios
+
+```ts title="org-complex.controller.ts"
+import { Controller, Post, Get } from "@nestjs/common";
+import { MemberHasPermission } from "@thallesp/nestjs-better-auth";
+
+@Controller("org")
+export class OrgComplexController {
+  // Multiple actions on single resource
+  @MemberHasPermission({ permissions: { project: ["create", "update", "share"] } })
+  @Post("project/publish")
+  async publishProject() {
+    // Member needs all three permissions
+    return { message: "Published" };
+  }
+
+  // Multiple resources with different actions
+  @MemberHasPermission({
+    permissions: {
+      project: ["create", "update"],
+      sale: ["create", "read"],
+      organization: ["update"],
+    },
+  })
+  @Post("complex-action")
+  async complexAction() {
+    // Member needs permissions across all three resources
+    return { message: "Action completed" };
+  }
+
+  // Single permission check
+  @MemberHasPermission({ permissions: { project: ["share"] } })
+  @Post("project/share")
+  async shareProject() {
+    return { message: "Shared" };
+  }
+}
+```
+
+## Permission Validation
+
+The decorator validates permissions against your organization access control configuration:
+
+```ts
+// ✅ Valid: Actions defined in statement
+@MemberHasPermission({ permissions: { project: ["create"] } })
+
+// ❌ Invalid: Action not in statement
+@MemberHasPermission({ permissions: { project: ["read"] } })
+// This will fail if "read" is not in your organization statement
+
+// ✅ Valid: Multiple actions
+@MemberHasPermission({ permissions: { project: ["create", "update", "delete"] } })
+
+// ✅ Valid: Multiple resources
+@MemberHasPermission({ permissions: { project: ["create"], organization: ["update"] } })
+```
+
+<Warning>
+  **Security Note:** Only use actions defined in your organization access control statement. Invalid actions will cause permission checks to fail.
+</Warning>
+
+## Organization Context Switching
+
+Permissions are checked against the active organization:
+
+```ts title="example.ts"
+import { auth } from "./auth";
+
+// User can be in multiple organizations with different roles/permissions
+
+// In Org A: user has 'editor' role (limited permissions)
+await auth.api.setActiveOrganization({
+  body: { organizationId: "org-a" },
+  headers: { Authorization: `Bearer ${token}` },
+});
+// Can create/update projects in Org A
+
+// In Org B: user has 'admin' role (more permissions)
+await auth.api.setActiveOrganization({
+  body: { organizationId: "org-b" },
+  headers: { Authorization: `Bearer ${token}` },
+});
+// Can create/update/delete projects in Org B
+```
+
+## Response Codes
+
+- **200**: Member has all required permissions in active organization
+- **401**: User is not authenticated
+- **403**: User is authenticated but lacks permissions or has no active organization
+
+## Debugging Permission Issues
+
+If permission checks fail unexpectedly, verify:
+
+1. Organization plugin with access control is configured in Better Auth
+2. User has an active organization set (`activeOrganizationId` in session)
+3. User is a member of the active organization with a role assigned
+4. The member's role has the required permissions
+5. Permission actions match your statement definition
+
+```ts
+// Check member's context in your controller
+import { Session, UserSession } from "@thallesp/nestjs-better-auth";
+
+@Get("debug")
+async debugMemberPermissions(@Session() session: UserSession) {
+  return {
+    userId: session.user.id,
+    activeOrgId: session.session.activeOrganizationId, // Check active org
+    // Call Better Auth API to get member role if needed
+  };
+}
+```
+
+## Related
+
+<CardGroup cols={2}>
+  <Card title="Organization Roles" icon="building" href="/authorization/organization-roles">
+    Use @OrgRoles() for simpler role-based checks
+  </Card>
+  <Card title="System Permissions" icon="shield" href="/authorization/permissions">
+    Use @UserHasPermission() for system-level permissions
+  </Card>
+</CardGroup>

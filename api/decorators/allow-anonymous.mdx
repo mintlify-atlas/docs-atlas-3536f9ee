@@ -1,0 +1,241 @@
+---
+title: '@AllowAnonymous'
+description: Allows unauthenticated access to a route or controller
+---
+
+## Overview
+
+`@AllowAnonymous()` is a decorator that marks routes or controllers as publicly accessible, bypassing authentication checks from the `AuthGuard`.
+
+## Type Signature
+
+```typescript
+export const AllowAnonymous = (): CustomDecorator<string> =>
+  SetMetadata("PUBLIC", true);
+```
+
+## Usage
+
+### On a Single Route
+
+```typescript
+import { Controller, Get } from '@nestjs/common';
+import { AllowAnonymous } from '@better-auth/nestjs';
+
+@Controller('api')
+export class ApiController {
+  @AllowAnonymous()
+  @Get('health')
+  healthCheck() {
+    return { status: 'ok' };
+  }
+
+  @Get('protected')
+  protectedRoute() {
+    // This route requires authentication
+    return { message: 'You are authenticated' };
+  }
+}
+```
+
+### On an Entire Controller
+
+```typescript
+import { Controller, Get } from '@nestjs/common';
+import { AllowAnonymous } from '@better-auth/nestjs';
+
+@AllowAnonymous()
+@Controller('public')
+export class PublicController {
+  @Get('posts')
+  listPosts() {
+    return 'Anyone can view posts';
+  }
+
+  @Get('about')
+  about() {
+    return 'Public about page';
+  }
+}
+```
+
+## Examples
+
+### Public API Endpoints
+
+```typescript
+@Controller('api/v1')
+export class ApiController {
+  @AllowAnonymous()
+  @Get('status')
+  getStatus() {
+    return {
+      status: 'operational',
+      version: '1.0.0',
+      timestamp: new Date(),
+    };
+  }
+
+  @AllowAnonymous()
+  @Get('config')
+  getPublicConfig() {
+    return {
+      features: ['auth', 'organizations'],
+      maxUploadSize: '10MB',
+    };
+  }
+}
+```
+
+### Mixed Access in Controller
+
+```typescript
+@Controller('blog')
+export class BlogController {
+  @AllowAnonymous()
+  @Get('posts')
+  listPublicPosts() {
+    return this.blogService.getPublishedPosts();
+  }
+
+  @AllowAnonymous()
+  @Get('posts/:id')
+  getPublicPost(@Param('id') id: string) {
+    return this.blogService.getPublishedPost(id);
+  }
+
+  @Post('posts')
+  createPost(@Session() session: UserSession) {
+    // Requires authentication
+    return this.blogService.createDraft(session.user.id);
+  }
+}
+```
+
+### Health Checks and Monitoring
+
+```typescript
+@Controller('monitoring')
+export class MonitoringController {
+  @AllowAnonymous()
+  @Get('health')
+  health() {
+    return { healthy: true };
+  }
+
+  @AllowAnonymous()
+  @Get('ready')
+  ready() {
+    return { ready: this.appService.isReady() };
+  }
+
+  @AllowAnonymous()
+  @Get('metrics')
+  metrics() {
+    return this.metricsService.getPublicMetrics();
+  }
+}
+```
+
+### Webhooks
+
+```typescript
+@Controller('webhooks')
+export class WebhooksController {
+  @AllowAnonymous()
+  @Post('stripe')
+  handleStripeWebhook(@Body() payload: any) {
+    // Verify signature in the handler
+    return this.stripeService.processWebhook(payload);
+  }
+
+  @AllowAnonymous()
+  @Post('github')
+  handleGithubWebhook(@Body() payload: any) {
+    return this.githubService.processWebhook(payload);
+  }
+}
+```
+
+## Behavior
+
+When `@AllowAnonymous()` is applied:
+
+1. **AuthGuard** checks for the decorator and skips authentication
+2. **No session required** - The route handler executes without a session
+3. **Request.session is null** - `@Session()` decorator returns `null`
+4. **Overrides global guard** - Even when `AuthGuard` is global
+
+### Accessing Session (if present)
+
+```typescript
+@AllowAnonymous()
+@Get('posts')
+listPosts(@Session() session: UserSession | null) {
+  // Session might be present if user is logged in
+  if (session) {
+    return this.postsService.getPersonalizedPosts(session.user.id);
+  }
+  return this.postsService.getPublicPosts();
+}
+```
+
+<Warning>
+Note: `@AllowAnonymous()` makes the route completely public. The session will be `null` even if the user is authenticated. If you want to support both authenticated and unauthenticated access with session data when available, use [`@OptionalAuth()`](/api/decorators/optional-auth) instead.
+</Warning>
+
+## When to Use
+
+Use `@AllowAnonymous()` for:
+
+- **Public API endpoints** that don't require authentication
+- **Health checks** and monitoring endpoints
+- **Webhooks** from external services
+- **Static content** endpoints
+- **Authentication endpoints** (handled by Better Auth)
+- **Public documentation** or help pages
+
+## Comparison with @OptionalAuth
+
+| Feature | @AllowAnonymous | @OptionalAuth |
+|---------|----------------|---------------|
+| Requires auth | No | No |
+| Allows auth | No (skips check) | Yes |
+| Session available | No (always null) | Yes (if authenticated) |
+| Use case | Truly public routes | Routes that benefit from auth but don't require it |
+
+## Alternative Name
+
+`@Public()` is an alias for `@AllowAnonymous()`:
+
+```typescript
+import { Public } from '@better-auth/nestjs';
+
+@Public() // Same as @AllowAnonymous()
+@Get('public')
+publicRoute() {
+  return 'This is public';
+}
+```
+
+<Note>
+`@Public()` is deprecated in favor of `@AllowAnonymous()` for better clarity.
+</Note>
+
+## Notes
+
+- Does not disable other guards or interceptors
+- Only bypasses `AuthGuard` authentication check
+- Method-level decorator overrides controller-level decorator
+- Still subject to global exception filters and interceptors
+
+## Related
+
+<CardGroup cols={2}>
+  <Card title="@OptionalAuth" href="/api/decorators/optional-auth" icon="lock-open">
+    Optional authentication decorator
+  </Card>
+  <Card title="AuthGuard" href="/api/auth-guard" icon="shield">
+    Authentication guard reference
+  </Card>
+</CardGroup>
